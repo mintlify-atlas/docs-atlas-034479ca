@@ -1,0 +1,197 @@
+---
+title: "Registration examples"
+description: "Code examples for mesh and point cloud alignment"
+---
+
+Registration aligns two or more 3D objects into a common coordinate frame. MeshLib provides pairwise ICP for aligning two objects and multi-way ICP for simultaneously registering any number of point clouds.
+
+## ICP pairwise registration
+
+Iterative Closest Point (ICP) aligns a "floating" mesh to a "fixed" reference mesh by iteratively minimising the distance between corresponding point pairs. The output is an `AffineXf3f` transform you apply to the floating mesh.
+
+<CodeGroup>
+
+```python icp.py
+import meshlib.mrmeshpy as mrmeshpy
+
+# Load meshes
+meshFloating = mrmeshpy.loadMesh("meshA.stl")
+meshFixed = mrmeshpy.loadMesh("meshB.stl")
+
+# Prepare ICP parameters
+diagonal = meshFixed.getBoundingBox().diagonal()
+icp_sampling_voxel_size = diagonal * 0.01  # voxel size for point sampling
+
+icp_params = mrmeshpy.ICPProperties()
+icp_params.distThresholdSq = (diagonal * 0.1) ** 2  # maximum pair distance (squared)
+icp_params.exitVal = diagonal * 0.003               # stop when RMS distance reaches this value
+
+# Create ICP object and run
+icp = mrmeshpy.ICP(
+    meshFloating, meshFixed,
+    mrmeshpy.AffineXf3f(), mrmeshpy.AffineXf3f(),
+    icp_sampling_voxel_size
+)
+icp.setParams(icp_params)
+xf = icp.calculateTransformation()
+
+# Apply transform to the floating mesh
+meshFloating.transform(xf)
+
+# Print convergence info
+print(icp.getLastICPInfo())
+
+# Save result
+mrmeshpy.saveMesh(meshFloating, "meshA_icp.stl")
+```
+
+```cpp icp.cpp
+#include <MRMesh/MRBox.h>
+#include <MRMesh/MRICP.h>
+#include <MRMesh/MRMesh.h>
+#include <MRMesh/MRMeshLoad.h>
+#include <MRMesh/MRMeshSave.h>
+#include <iostream>
+
+int main()
+{
+    auto meshFloatingRes = MR::MeshLoad::fromAnySupportedFormat( "meshA.stl" );
+    if ( !meshFloatingRes.has_value() )
+    {
+        std::cerr << meshFloatingRes.error() << std::endl;
+        return 1;
+    }
+    MR::Mesh& meshFloating = *meshFloatingRes;
+
+    auto meshFixedRes = MR::MeshLoad::fromAnySupportedFormat( "meshB.stl" );
+    if ( !meshFixedRes.has_value() )
+    {
+        std::cerr << meshFixedRes.error() << std::endl;
+        return 1;
+    }
+    MR::Mesh& meshFixed = *meshFixedRes;
+
+    // Prepare ICP parameters
+    float diagonal = meshFixed.getBoundingBox().diagonal();
+    float icpSamplingVoxelSize = diagonal * 0.01f;
+    MR::ICPProperties icpParams;
+    icpParams.distThresholdSq = MR::sqr( diagonal * 0.1f );
+    icpParams.exitVal = diagonal * 0.003f;
+
+    // Calculate transformation
+    MR::ICP icp(
+        MR::MeshOrPoints{ MR::MeshPart{ meshFloating } },
+        MR::MeshOrPoints{ MR::MeshPart{ meshFixed } },
+        MR::AffineXf3f(), MR::AffineXf3f(),
+        icpSamplingVoxelSize );
+    icp.setParams( icpParams );
+    MR::AffineXf3f xf = icp.calculateTransformation();
+
+    // Transform floating mesh
+    meshFloating.transform( xf );
+
+    // Output convergence info
+    std::string info = icp.getStatusInfo();
+    std::cerr << info << std::endl;
+
+    // Save result
+    if ( auto saveRes = MR::MeshSave::toAnySupportedFormat( meshFloating, "meshA_icp.stl" ); !saveRes )
+    {
+        std::cerr << saveRes.error() << std::endl;
+        return 1;
+    }
+}
+```
+
+</CodeGroup>
+
+`distThresholdSq` filters out point pairs that are too far apart to be reliable correspondences. Setting it to `(diagonal * 0.1)²` ignores pairs more than 10% of the bounding box apart, which prevents the algorithm from locking onto incorrect correspondences during early iterations.
+
+<Tip>
+  If the two meshes start far apart, apply a coarse manual pre-alignment (e.g. centre both meshes or use principal axis alignment) before running ICP. ICP converges to a local minimum and will not recover from a large initial misalignment.
+</Tip>
+
+## Multi-way global registration
+
+`MultiwayICP` simultaneously aligns any number of point clouds into a single common coordinate frame. Unlike pairwise ICP it has no fixed reference — all objects are allowed to move.
+
+```python global_registration.py
+import os
+import sys
+import meshlib.mrmeshpy as mrmeshpy
+
+
+def print_stats(icp):
+    num_active_pairs = icp.getNumActivePairs()
+    print(f"Number of samples: {icp.getNumSamples()}")
+    print(f"Number of active pairs: {num_active_pairs}")
+
+    if num_active_pairs > 0:
+        p2pt_metric = icp.getMeanSqDistToPoint()
+        p2pt_inaccuracy = icp.getMeanSqDistToPoint(value=p2pt_metric)
+        print(f"RMS point-to-point distance: {p2pt_metric} ± {p2pt_inaccuracy}")
+
+        p2pl_metric = icp.getMeanSqDistToPlane()
+        p2pl_inaccuracy = icp.getMeanSqDistToPlane(p2pt_metric)
+        print(f"RMS point-to-plane distance: {p2pl_metric} ± {p2pl_inaccuracy}")
+
+
+def main(argv):
+    if len(argv) < 4:
+        print(f"Usage: {argv[0]} INPUT1 INPUT2 [INPUTS...] OUTPUT")
+        return
+    file_args = argv[1:]
+
+    # Load inputs and find the largest bounding box
+    input_clouds_num = len(file_args) - 1
+    inputs = []
+    max_bbox = None
+    for i in range(input_clouds_num):
+        points = mrmeshpy.loadPoints(file_args[i])
+        transform = mrmeshpy.AffineXf3f()
+        points_with_transform = mrmeshpy.MeshOrPointsXf(points, transform)
+        inputs.append(points_with_transform)
+
+        bbox = points.getBoundingBox()
+        if not max_bbox or bbox.volume() > max_bbox.volume():
+            max_bbox = bbox
+
+    # Configure ICP sampling
+    sampling_params = mrmeshpy.MultiwayICPSamplingParameters()
+    sampling_params.samplingVoxelSize = max_bbox.diagonal() * 0.03
+
+    inputs_obj = mrmeshpy.Vector_MeshOrPointsXf_ObjId(inputs)
+
+    icp = mrmeshpy.MultiwayICP(inputs_obj, sampling_params)
+    icp_properties = mrmeshpy.ICPProperties()
+    icp.setParams(icp_properties)
+
+    icp.updateAllPointPairs()
+
+    print("Calculating transformations...")
+    xfs = icp.calculateTransformations()
+    print_stats(icp)
+
+    # Merge all transformed clouds into a single output
+    output = mrmeshpy.PointCloud()
+    for i in range(input_clouds_num):
+        transform = xfs.vec_[i]
+        for point in inputs[i].obj.points():
+            transformed_point = transform(point)
+            output.addPoint(transformed_point)
+
+    mrmeshpy.PointsSave.toAnySupportedFormat(output, file_args[-1])
+
+
+main(sys.argv)
+```
+
+Run the script by passing two or more input point cloud files followed by an output path:
+
+```bash
+python global_registration.py scan1.ply scan2.ply scan3.ply merged.ply
+```
+
+<Note>
+  `samplingVoxelSize` controls how densely the point clouds are sampled for correspondence search. A value of `diagonal * 0.03` (3% of the largest bounding box) is a practical starting point. Smaller values give more point pairs and higher accuracy but increase computation time.
+</Note>

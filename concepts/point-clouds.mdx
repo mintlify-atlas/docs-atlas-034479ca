@@ -1,0 +1,130 @@
+---
+title: "Point clouds"
+description: "Working with 3D point cloud data in MeshLib"
+---
+
+A point cloud is a set of 3D points, each optionally accompanied by a surface normal. MeshLib represents point clouds with the `MR::PointCloud` struct (`MRPointCloud.h`) and provides utilities for loading, saving, normal estimation, and triangulation.
+
+## MR::PointCloud struct
+
+```cpp
+struct PointCloud {
+    VertCoords  points;      // Vector<Vector3f, VertId> — one position per VertId
+    VertNormals normals;     // Vector<Vector3f, VertId> — unit normal per point (may be empty)
+    VertBitSet  validPoints; // only points with set bits are considered active
+};
+```
+
+`VertCoords` and `VertNormals` are both `MR::Vector<MR::Vector3f, MR::VertId>`. The `validPoints` BitSet gates all operations: functions that iterate points check this set rather than assuming every index is occupied.
+
+### Key methods
+
+| Method | Description |
+|---|---|
+| `calcNumValidPoints()` | Returns `validPoints.count()` |
+| `hasNormals()` | Returns `true` if `normals.size() >= points.size()` |
+| `getVertIds( region )` | Returns `*region` if given, otherwise `validPoints` |
+| `addPoint( pos )` | Appends a point and returns its `VertId` |
+| `addPoint( pos, normal )` | Appends a point with normal |
+| `transform( xf, region )` | Applies `AffineXf3f` to points and transforms normals accordingly |
+| `getBoundingBox()` | Returns AABB of all valid points (uses cached AABB tree) |
+| `invalidateCaches()` | Clears the internal AABB tree after external modifications |
+
+## Loading and saving
+
+<CodeGroup>
+
+```cpp C++
+#include <MRMesh/MRPointsLoad.h>
+#include <MRMesh/MRPointsSave.h>
+#include <iostream>
+
+// Load — detects format from file extension
+auto loadRes = MR::PointsLoad::fromAnySupportedFormat( "scan.ply" );
+if ( !loadRes.has_value() )
+{
+    std::cerr << loadRes.error() << "\n";
+    return 1;
+}
+MR::PointCloud& pc = *loadRes;
+
+// Save — detects format from file extension
+auto saveRes = MR::PointsSave::toAnySupportedFormat( pc, "output.ply" );
+if ( !saveRes.has_value() )
+    std::cerr << saveRes.error() << "\n";
+```
+
+```python Python
+import meshlib.mrmeshpy as mrmeshpy
+
+# Load — format detected from extension (.ply, .xyz, .xyzn, ...)
+pc = mrmeshpy.loadPoints("scan.ply")
+
+# Save
+mrmeshpy.PointsSave.toAnySupportedFormat(pc, "output.ply")
+```
+
+</CodeGroup>
+
+Supported formats include `.ply`, `.xyz`, `.xyzn`, `.asc`, `.e57`, and others depending on build configuration.
+
+## Computing normals
+
+Normal estimation operates on a loaded `PointCloud`. The main function is `makeOrientedNormals`, which estimates per-point normals from local neighborhoods and then globally orients them for consistency:
+
+```cpp
+#include <MRMesh/MRPointCloudMakeNormals.h>
+
+// Estimate and orient normals; radius controls the neighborhood size
+float radius = 0.05f; // world-space units
+auto normalsOpt = MR::makeOrientedNormals( pc, radius );
+if ( normalsOpt )
+    pc.normals = std::move( *normalsOpt );
+```
+
+`makeUnorientedNormals` estimates normals without the global orientation pass — faster but may produce inward-facing normals in concave regions. `makeNormals` is a simpler legacy variant that takes an average neighborhood size:
+
+```cpp
+// Legacy helper — estimates normals using ~48 nearest neighbors
+pc.normals = MR::makeNormals( pc, /*avgNeighborhoodSize=*/48 );
+```
+
+In Python:
+
+```python
+import meshlib.mrmeshpy as mrmeshpy
+
+pc = mrmeshpy.loadPoints("scan.ply")
+normals = mrmeshpy.makeOrientedNormals(pc, 0.05)
+if normals:
+    pc.normals = normals.value()
+```
+
+<Note>
+Many triangulation and registration algorithms require normals. Always check `pc.hasNormals()` before passing a point cloud to those functions.
+</Note>
+
+## Triangulating a point cloud
+
+`triangulatePointCloud` converts a `PointCloud` with normals into a `Mesh`. See [Point cloud triangulation](/guides/point-cloud-triangulation) for the full workflow.
+
+<CodeGroup>
+
+```cpp C++
+#include <MRMesh/MRPointCloudTriangulation.h>
+#include <MRMesh/MRMeshSave.h>
+
+auto meshOpt = MR::triangulatePointCloud( pc );
+if ( meshOpt )
+    MR::MeshSave::toAnySupportedFormat( *meshOpt, "result.ctm" );
+```
+
+```python Python
+from meshlib import mrmeshpy as mm
+
+pc = mm.loadPoints("Points.ply")
+mesh = mm.triangulatePointCloud(pc)
+mm.saveMesh(mesh, "Mesh.ctm")
+```
+
+</CodeGroup>

@@ -1,0 +1,105 @@
+---
+title: "Mesh decimation"
+description: "Simplify meshes while preserving shape within tolerance"
+---
+
+Mesh decimation reduces the number of faces and vertices in a mesh while keeping the resulting surface within a configurable error bound. Common uses include preparing meshes for real-time rendering, reducing file size before export, and speeding up downstream algorithms that scale with polygon count.
+
+MeshLib implements decimation through `decimateMesh()` in `MRMesh/MRMeshDecimate.h`. The algorithm uses quadric error metrics to collapse edges in order of their contribution to surface error.
+
+## DecimateSettings
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `maxError` | `float` | Decimation stops when the next collapse would exceed this surface deviation. Lower values preserve more detail. |
+| `maxDeletedFaces` | `int` | Decimation stops after this many faces have been removed. You may specify `maxError`, `maxDeletedFaces`, or both; the algorithm stops at whichever threshold is reached first. |
+| `subdivideParts` | `int` | Number of independent mesh regions processed in parallel. Higher values improve performance at the cost of minor quality loss near region boundaries. |
+
+## Code examples
+
+<CodeGroup>
+
+```python decimate.py
+import meshlib.mrmeshpy as mrmeshpy
+
+# Load mesh
+mesh = mrmeshpy.loadMesh("mesh.stl")
+
+# Repack mesh optimally.
+# It's not necessary but highly recommended to achieve the best performance in parallel processing
+mesh.packOptimally()
+
+# Setup decimate parameters
+settings = mrmeshpy.DecimateSettings()
+
+# Decimation stop thresholds, you may specify one or both
+settings.maxDeletedFaces = 1000 # Number of faces to be deleted
+settings.maxError = 0.05 # Maximum error when decimation stops
+
+# Number of parts to simultaneous processing, greatly improves performance by cost of minor quality loss.
+# Recommended to set to number of CPU cores or more available for the best performance
+settings.subdivideParts = 64
+
+# Decimate mesh
+mrmeshpy.decimateMesh(mesh, settings)
+
+# Save result
+mrmeshpy.saveMesh(mesh, "decimatedMesh.stl")
+```
+
+```cpp decimate.cpp
+#include <MRMesh/MRMeshFwd.h>
+#include <MRMesh/MRMeshLoad.h>
+#include <MRMesh/MRMeshSave.h>
+#include <MRMesh/MRMesh.h>
+#include <MRMesh/MRMeshDecimate.h>
+#include <MRMesh/MRBuffer.h>
+
+#include <iostream>
+
+int main()
+{
+    // Load mesh
+    auto meshRes = MR::MeshLoad::fromAnySupportedFormat( "mesh.stl" );
+    if ( !meshRes.has_value() )
+    {
+        std::cerr << meshRes.error() << std::endl;
+        return 1;
+    }
+
+    MR::Mesh& mesh = *meshRes;
+
+    // Repack mesh optimally.
+    // It's not necessary but highly recommended to achieve the best performance in parallel processing
+    mesh.packOptimally();
+
+    // Setup decimate parameters
+    MR::DecimateSettings settings;
+
+    // Decimation stop thresholds, you may specify one or both
+    settings.maxDeletedFaces = 1000; // Number of faces to be deleted
+    settings.maxError = 0.05f; // Maximum error when decimation stops
+
+    // Number of parts to simultaneous processing, greatly improves performance by cost of minor quality loss.
+    // Recommended to set to the number of available CPU cores or more for the best performance
+    settings.subdivideParts = 64;
+
+    // Decimate mesh
+    MR::decimateMesh( mesh, settings );
+
+    // Save result
+    if ( auto saveRes = MR::MeshSave::toAnySupportedFormat( mesh, "decimated_mesh.stl" ); !saveRes )
+    {
+        std::cerr << saveRes.error() << std::endl;
+        return 1;
+    }
+
+    return 0;
+}
+```
+
+</CodeGroup>
+
+<Tip>
+Set `subdivideParts` to the number of CPU cores available on the target machine (or higher) for best throughput. The algorithm splits the mesh into that many regions and processes them simultaneously. The quality impact near region boundaries is minor for most meshes.
+</Tip>

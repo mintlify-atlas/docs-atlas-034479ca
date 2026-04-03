@@ -1,0 +1,148 @@
+---
+title: "Voxels"
+description: "Volume-based 3D processing with MeshLib voxels"
+---
+
+MeshLib represents volumetric data as **signed distance fields** stored in [OpenVDB](https://www.openvdb.org/) float grids. This lets you compute smooth boolean operations, convert meshes to volumes, reconstruct surfaces, and load DICOM medical data — all within a consistent voxel pipeline.
+
+<Warning>
+The voxel module lives in a separate library (`MRVoxels`). You must link against `MRVoxels` and include headers from `source/MRVoxels/` to use any of the APIs on this page.
+</Warning>
+
+## FloatGrid
+
+`MR::FloatGrid` (`MRFloatGrid.h`) is a thin wrapper around an `openvdb::FloatGrid` shared pointer. It exposes the grid through `get()`, `operator*`, and `operator->`, and participates in Boolean SDF operations through overloaded operators:
+
+```cpp
+// From MRFloatGrid.h
+
+// Union of two signed distance fields (consumes b)
+MR::FloatGrid result = gridA += std::move( gridB );
+
+// Non-destructive union (keeps a and b unchanged)
+MR::FloatGrid result = gridA + gridB;
+
+// Difference (a - b) and intersection (a * b) follow the same pattern
+MR::FloatGrid diff   = gridA - gridB;
+MR::FloatGrid inter  = gridA * gridB;
+```
+
+Utility free functions let you query, filter, and resize grids:
+
+```cpp
+// Resample to a new voxel scale
+MR::FloatGrid coarser = MR::resampled( grid, 2.0f ); // 2× larger voxels
+
+// Read and write individual voxel values
+float v = MR::getValue( grid, MR::Vector3i{ 10, 20, 30 } );
+MR::setValue( grid, MR::Vector3i{ 10, 20, 30 }, -0.5f );
+
+// Gaussian smoothing
+MR::gaussianFilter( grid, /*width=*/3, /*iters=*/2 );
+
+// Count voxels below the iso surface
+size_t inside = MR::countVoxelsWithValueLess( grid, 0.0f );
+```
+
+## ObjectVoxels
+
+`MR::ObjectVoxels` (`MRObjectVoxels.h`) is the scene-graph node that wraps a `VdbVolume` (a `FloatGrid` plus voxel size and dimension metadata) and manages its iso-surface:
+
+```cpp
+MR::ObjectVoxels obj;
+
+// Construct from a SimpleVolume (dense float array)
+obj.construct( simpleVolume );
+
+// Construct from an existing FloatGrid
+obj.construct( grid, voxelSize );
+
+// Get the underlying data
+const MR::VdbVolume& vol   = obj.vdbVolume();
+const MR::FloatGrid& grid  = obj.grid();
+const MR::Vector3i&  dims  = obj.dimensions();
+const MR::Vector3f&  vsize = obj.voxelSize();
+
+// Extract or update the iso-surface at a given threshold
+obj.setIsoValue( 0.0f );
+
+// The resulting mesh
+const std::shared_ptr<MR::Mesh>& surface = obj.surface();
+```
+
+<Tip>
+`ObjectVoxels` defaults to Dual Marching Cubes for surface extraction, which produces higher-quality meshes than standard Marching Cubes. Call `getDualMarchingCubes()` or `setDualMarchingCubes(false)` to switch.
+</Tip>
+
+## Converting a mesh to voxels
+
+`meshToDistanceVolume` (`MRMeshToDistanceVolume.h`) fills a volume with signed distances from the mesh surface:
+
+```cpp
+#include <MRVoxels/MRMeshToDistanceVolume.h>
+#include <MRVoxels/MRMarchingCubes.h>
+
+MR::MeshToDistanceVolumeParams params;
+params.vol.voxelSize = MR::Vector3f::diagonal( 0.1f ); // 0.1 world-unit voxels
+params.vol.origin    = mesh.getBoundingBox().min;
+params.vol.dimensions = /* compute from bounding box */ ...;
+
+auto volumeRes = MR::meshToDistanceVolume( mesh, params );
+```
+
+## Reconstructing a mesh from voxels
+
+`marchingCubes` (`MRMarchingCubes.h`) extracts a mesh from any volume type at a given iso value:
+
+```cpp
+MR::MarchingCubesParams mcParams;
+mcParams.iso = 0.0f;      // extract the zero iso-surface
+mcParams.lessInside = true; // set true for signed distance volumes
+
+// Works with SimpleVolumeMinMax, VdbVolume, FunctionVolume, and others
+auto meshRes = MR::marchingCubes( volume, mcParams );
+if ( meshRes.has_value() )
+{
+    MR::Mesh& result = *meshRes;
+}
+```
+
+## Voxel-based boolean operations
+
+The `FloatGrid` operators implement CSG on signed distance fields, which is more robust than direct mesh boolean for complex or near-degenerate geometry:
+
+```cpp
+// Convert both meshes to SDF grids, then combine
+MR::FloatGrid gridA = /* meshToDistanceVolume for meshA */;
+MR::FloatGrid gridB = /* meshToDistanceVolume for meshB */;
+
+MR::FloatGrid unionGrid  = gridA + gridB;
+MR::FloatGrid diffGrid   = gridA - gridB;
+MR::FloatGrid interGrid  = gridA * gridB;
+
+// Extract surface from the result
+auto resultMesh = MR::marchingCubes( /* wrap grid in VdbVolume */ );
+```
+
+## Loading DICOM files
+
+`VoxelsLoad::loadDicomsFolderTreeAsVdb` loads a folder tree of DICOM slices and returns one `VdbVolume` per sub-folder:
+
+```python
+from meshlib import mrmeshpy
+
+# Path to a folder containing numbered DICOM slices
+# (sub-folders are loaded as separate volumes)
+dicom_folder = 'path/to/dicom/folder'
+dicoms = mrmeshpy.VoxelsLoad.loadDicomsFolderTreeAsVdb(dicom_folder)
+
+dicom = dicoms[0]
+if dicom:
+    vdb_volume = dicom.value().vol
+else:
+    print(dicom.error())
+```
+
+<Note>
+Each `VdbVolume` returned by `loadDicomsFolderTreeAsVdb` contains a `FloatGrid` (`vol.data`), voxel size (`vol.voxelSize`), and grid dimensions (`vol.dims`). Pass it to `marchingCubes` to generate a surface mesh.
+</Note>

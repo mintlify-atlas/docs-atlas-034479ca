@@ -1,0 +1,107 @@
+---
+title: "Mesh repair"
+description: "Fix self-intersections, fill holes, and remove mesh degeneracies"
+---
+
+Real-world meshes frequently contain defects that cause downstream algorithms to fail or produce incorrect results. Common sources include 3D scanning artifacts, degenerate triangles from CAD format conversion, and connectivity errors from procedural generation.
+
+Apply repairs in this order: fix degeneracies first, then fill holes.
+
+## Fix degeneracies
+
+Degenerate triangles have zero or near-zero area. They cause numerical instability in most mesh algorithms. `fixMeshDegeneracies()` removes them by collapsing tiny edges and merging near-coincident vertices.
+
+<CodeGroup>
+
+```python fix_degeneracies.py
+import meshlib.mrmeshpy as mrmeshpy
+
+# Load mesh
+mesh = mrmeshpy.loadMesh("mesh.stl")
+
+# you can set various parameters for the resolving process; see the documentation for more info
+params = mrmeshpy.FixMeshDegeneraciesParams()
+params.maxDeviation = 1e-5 * mesh.computeBoundingBox().diagonal()
+params.tinyEdgeLength = 1e-3
+
+mrmeshpy.fixMeshDegeneracies(mesh, params)
+
+mrmeshpy.saveMesh(mesh, "fixed_mesh.stl")
+```
+
+</CodeGroup>
+
+### FixMeshDegeneraciesParams
+
+| Field | Description |
+|-------|-------------|
+| `maxDeviation` | Maximum permitted surface deviation when collapsing edges. A value of `1e-5 * bbox.diagonal()` is a practical starting point. |
+| `tinyEdgeLength` | Edges shorter than this are collapsed unconditionally. Set to a small fraction of the smallest feature you want to preserve (e.g. `1e-3`). |
+
+## Fill holes
+
+Holes are boundary loops with no adjacent face on one side. Use `findHoleRepresentiveEdges()` to enumerate all holes in the mesh, then call `fillHole()` for each one.
+
+<CodeGroup>
+
+```python fill_hole.py
+import meshlib.mrmeshpy as mrmeshpy
+
+# Load mesh
+mesh = mrmeshpy.loadMesh("mesh.stl")
+
+# Find single edge for each hole in mesh
+hole_edges = mesh.topology.findHoleRepresentiveEdges()
+
+for e in hole_edges:
+    #  Setup filling parameters
+    params = mrmeshpy.FillHoleParams()
+    params.metric = mrmeshpy.getUniversalMetric(mesh)
+    #  Fill hole represented by `e`
+    mrmeshpy.fillHole(mesh, e, params)
+
+# Save result
+mrmeshpy.saveMesh(mesh, "filledMesh.stl")
+```
+
+```cpp fill_hole.cpp
+#include <MRMesh/MRMesh.h>
+#include <MRMesh/MRMeshFillHole.h>
+#include <MRMesh/MRMeshLoad.h>
+#include <MRMesh/MRMeshSave.h>
+
+int main()
+{
+    // Load mesh
+    MR::Mesh mesh = *MR::MeshLoad::fromAnySupportedFormat( "mesh.stl" );
+
+    // Find single edge for each hole in mesh
+    std::vector<MR::EdgeId> holeEdges = mesh.topology.findHoleRepresentiveEdges();
+
+    for ( MR::EdgeId e : holeEdges )
+    {
+        // Setup filling parameters
+        MR::FillHoleParams params;
+        params.metric = MR::getUniversalMetric( mesh );
+        // Fill hole represented by `e`
+        MR::fillHole( mesh, e, params );
+    }
+
+    // Save result
+    auto saveRes = MR::MeshSave::toAnySupportedFormat( mesh, "filledMesh.stl" );
+}
+```
+
+</CodeGroup>
+
+### findHoleRepresentiveEdges()
+
+`mesh.topology.findHoleRepresentiveEdges()` returns one `EdgeId` per hole. Each returned edge lies on the boundary of that hole and has no left face. Pass each edge directly to `fillHole()`.
+
+### FillHoleParams
+
+| Field | Description |
+|-------|-------------|
+| `metric` | Triangulation quality objective. `getUniversalMetric(mesh)` is recommended when hole shape is unknown. Use `getCircumscribedMetric(mesh)` to minimize circumradius, or `getPlanarMetric(mesh)` for known planar holes. |
+| `smoothBd` | When `true` (default), the metric is applied to boundary edges shared with the existing mesh for a smoother transition. |
+| `outNewFaces` | Optional. If non-null, populated with the IDs of all newly created faces. |

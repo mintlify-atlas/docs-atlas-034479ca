@@ -1,0 +1,148 @@
+---
+title: "C++ API"
+description: "Use MeshLib natively from C++ with the MR namespace"
+---
+
+MeshLib is written in C++. All types and functions live in the `MR` namespace. Headers are organized by feature area under `MRMesh/` and `MRIOExtras/`.
+
+## Namespace and headers
+
+```cpp
+#include <MRMesh/MRMesh.h>         // Mesh type and topology
+#include <MRMesh/MRMeshLoad.h>     // MeshLoad::fromAnySupportedFormat
+#include <MRMesh/MRMeshSave.h>     // MeshSave::toAnySupportedFormat
+#include <MRMesh/MRMeshBoolean.h>  // boolean(), BooleanOperation, BooleanResult
+#include <MRMesh/MRUVSphere.h>     // makeUVSphere
+#include <MRIOExtras/MRCtm.h>      // CTM format (optional extra module)
+```
+
+All public symbols are in `namespace MR`.
+
+## CMake integration
+
+<Steps>
+  <Step title="Find the package">
+    ```cmake CMakeLists.txt
+    find_package(MeshLib REQUIRED)
+    ```
+  </Step>
+  <Step title="Link your target">
+    ```cmake CMakeLists.txt
+    target_link_libraries(my_app PRIVATE MeshLib::MRMesh)
+    ```
+
+    Link `MeshLib::MRIOExtras` as well if you need extra file formats such as CTM.
+  </Step>
+</Steps>
+
+## Loading and saving meshes
+
+`MeshLoad::fromAnySupportedFormat` and `MeshSave::toAnySupportedFormat` detect the format from the file extension. Both return `Expected<T>` — check `has_value()` before using the result.
+
+```cpp mesh_load_save.cpp
+#include <MRMesh/MRMesh.h>
+#include <MRMesh/MRMeshLoad.h>
+#include <MRMesh/MRMeshSave.h>
+#include <MRIOExtras/MRCtm.h>
+
+#include <iostream>
+
+int main()
+{
+    // Load mesh
+    std::filesystem::path inFilePath = "mesh.stl";
+    auto loadRes = MR::MeshLoad::fromAnySupportedFormat( inFilePath );
+    if ( !loadRes.has_value() )
+    {
+        std::cerr << loadRes.error() << std::endl;
+        return 1;
+    }
+
+    // Save mesh
+    std::filesystem::path outFilePath = "mesh.ply";
+    auto saveRes = MR::MeshSave::toAnySupportedFormat( loadRes.value(), outFilePath );
+    if ( !saveRes.has_value() )
+    {
+        std::cerr << saveRes.error() << std::endl;
+        return 1;
+    }
+
+    // More mesh formats are available in the MRIOExtras library
+    std::filesystem::path outCtmFilePath = "mesh.ctm";
+    saveRes = MR::MeshSave::toCtm( loadRes.value(), outCtmFilePath );
+    if ( !saveRes.has_value() )
+    {
+        std::cerr << saveRes.error() << std::endl;
+        return 1;
+    }
+
+    return 0;
+}
+```
+
+## Boolean operations
+
+`MR::boolean()` takes two meshes and a `BooleanOperation` value and returns a `BooleanResult`. Dereference with `operator*` to get the output mesh.
+
+```cpp mesh_boolean.cpp
+#include <MRMesh/MRMesh.h>
+#include <MRMesh/MRMeshBoolean.h>
+#include <MRMesh/MRMeshSave.h>
+#include <MRMesh/MRUVSphere.h>
+
+#include <iostream>
+
+int main()
+{
+    // create first sphere with radius of 1 unit
+    MR::Mesh sphere1 = MR::makeUVSphere( 1.0f, 64, 64 );
+
+    // create second sphere by cloning the first sphere and moving it in X direction
+    MR::Mesh sphere2 = sphere1;
+    MR::AffineXf3f xf = MR::AffineXf3f::translation( MR::Vector3f( 0.7f, 0.0f, 0.0f ) );
+    sphere2.transform( xf );
+
+    // perform boolean operation
+    MR::BooleanResult result = MR::boolean( sphere1, sphere2, MR::BooleanOperation::Intersection );
+    if ( !result.valid() )
+        std::cerr << result.errorString << std::endl;
+
+    MR::Mesh resultMesh = *result;
+
+    // save result to STL file
+    if ( auto saveRes = MR::MeshSave::toAnySupportedFormat( resultMesh, "out_boolean.stl" ); !saveRes )
+    {
+        std::cerr << saveRes.error() << std::endl;
+        return 1;
+    }
+
+    return 0;
+}
+```
+
+## Expected\<T\> error handling
+
+MeshLib uses `MR::Expected<T, E>` (an alias for `tl::expected`) instead of exceptions for fallible operations. The pattern is consistent across all I/O and processing functions.
+
+```cpp
+auto result = MR::MeshLoad::fromAnySupportedFormat( path );
+if ( !result.has_value() )
+{
+    std::cerr << result.error() << std::endl;  // error() returns std::string
+    return 1;
+}
+MR::Mesh mesh = std::move( result.value() );
+```
+
+<Note>
+  `BooleanResult` uses a separate validity model: call `result.valid()` and read `result.errorString` rather than using `Expected` directly. Use `operator*` or `operator->` to access the result mesh after a successful check.
+</Note>
+
+## Module structure
+
+| Library | Purpose |
+|---|---|
+| `MRMesh` | Core mesh types, boolean, repair, I/O for common formats |
+| `MRIOExtras` | Additional file format support: CTM, DICOM, and others |
+| `MRVoxels` | Voxel grid and signed distance field operations |
+| `MRPython` | pybind11 export infrastructure (internal use) |

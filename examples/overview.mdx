@@ -1,0 +1,32 @@
+---
+title: "Examples overview"
+description: "Runnable code examples for common MeshLib operations"
+---
+
+These pages contain complete, runnable code examples for the most common MeshLib operations. Each example is taken directly from the MeshLib source repository and shown in Python, with C++ equivalents where available.
+
+<Note>
+  All Python examples require `meshlib` to be installed. Install it with:
+
+  ```bash
+  pip install meshlib
+  ```
+</Note>
+
+<CardGroup cols={2}>
+  <Card title="Boolean operations" icon="code-merge" href="/examples/boolean-operations">
+    Union, intersection, and difference on 3D meshes, with error handling
+  </Card>
+  <Card title="Mesh processing" icon="wrench" href="/examples/mesh-processing">
+    Decimation, hole filling, degeneracy repair, extrusion, and deformation
+  </Card>
+  <Card title="Point cloud" icon="circle-nodes" href="/examples/point-cloud">
+    Load, triangulate, and fuse point clouds; compute signed distance between meshes
+  </Card>
+  <Card title="Registration" icon="arrows-to-dot" href="/examples/registration">
+    Pairwise ICP alignment and multi-way global registration of point clouds
+  </Card>
+  <Card title="Voxel operations" icon="cube" href="/examples/voxel-operations">
+    Load DICOM files and work with voxel-based representations
+  </Card>
+</CardGroup>

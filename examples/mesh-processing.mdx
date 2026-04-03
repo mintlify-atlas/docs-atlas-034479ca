@@ -1,0 +1,301 @@
+---
+title: "Mesh processing examples"
+description: "Code examples for mesh repair, decimation, offsetting, and deformation"
+---
+
+This page collects runnable examples for the most common mesh processing operations: reducing polygon count, repairing defects, extruding faces, and deforming geometry.
+
+## Mesh decimation
+
+Reduce the number of faces while keeping the shape within a configurable error tolerance. `decimateMesh()` stops when either `maxDeletedFaces` or `maxError` is reached.
+
+<CodeGroup>
+
+```python decimate.py
+import meshlib.mrmeshpy as mrmeshpy
+
+# Load mesh
+mesh = mrmeshpy.loadMesh("mesh.stl")
+
+# Repack mesh optimally.
+# Not required, but strongly recommended before parallel processing.
+mesh.packOptimally()
+
+# Setup decimate parameters
+settings = mrmeshpy.DecimateSettings()
+
+# Decimation stop thresholds — specify one or both
+settings.maxDeletedFaces = 1000  # Number of faces to be deleted
+settings.maxError = 0.05         # Maximum error when decimation stops
+
+# Number of parts for simultaneous processing.
+# Greatly improves performance at the cost of minor quality loss.
+# Recommended: set to the number of available CPU cores or more.
+settings.subdivideParts = 64
+
+# Decimate mesh
+mrmeshpy.decimateMesh(mesh, settings)
+
+# Save result
+mrmeshpy.saveMesh(mesh, "decimatedMesh.stl")
+```
+
+```cpp decimate.cpp
+#include <MRMesh/MRMeshFwd.h>
+#include <MRMesh/MRMeshLoad.h>
+#include <MRMesh/MRMeshSave.h>
+#include <MRMesh/MRMesh.h>
+#include <MRMesh/MRMeshDecimate.h>
+#include <iostream>
+
+int main()
+{
+    auto meshRes = MR::MeshLoad::fromAnySupportedFormat( "mesh.stl" );
+    if ( !meshRes.has_value() )
+    {
+        std::cerr << meshRes.error() << std::endl;
+        return 1;
+    }
+
+    MR::Mesh& mesh = *meshRes;
+
+    // Repack mesh optimally — recommended before parallel processing
+    mesh.packOptimally();
+
+    // Setup decimate parameters
+    MR::DecimateSettings settings;
+
+    // Decimation stop thresholds — specify one or both
+    settings.maxDeletedFaces = 1000; // Number of faces to be deleted
+    settings.maxError = 0.05f;       // Maximum error when decimation stops
+
+    // Number of parts for simultaneous processing
+    settings.subdivideParts = 64;
+
+    // Decimate mesh
+    MR::decimateMesh( mesh, settings );
+
+    // Save result
+    if ( auto saveRes = MR::MeshSave::toAnySupportedFormat( mesh, "decimated_mesh.stl" ); !saveRes )
+    {
+        std::cerr << saveRes.error() << std::endl;
+        return 1;
+    }
+
+    return 0;
+}
+```
+
+</CodeGroup>
+
+<Tip>
+  Call `packOptimally()` before decimation. It reorders vertices and faces for cache-coherent memory access, which significantly improves the performance of the parallel subdivision pass (`subdivideParts`).
+</Tip>
+
+## Fill holes
+
+`fillHole()` triangulates a single boundary loop. Use `findHoleRepresentiveEdges()` to enumerate every hole in the mesh first.
+
+```python fill_holes.py
+import meshlib.mrmeshpy as mrmeshpy
+
+# Load mesh
+mesh = mrmeshpy.loadMesh("mesh.stl")
+
+# Find one representative edge per hole
+hole_edges = mesh.topology.findHoleRepresentiveEdges()
+
+for e in hole_edges:
+    # Setup filling parameters
+    params = mrmeshpy.FillHoleParams()
+    params.metric = mrmeshpy.getUniversalMetric(mesh)
+    # Fill hole represented by `e`
+    mrmeshpy.fillHole(mesh, e, params)
+
+# Save result
+mrmeshpy.saveMesh(mesh, "filledMesh.stl")
+```
+
+<Note>
+  `getUniversalMetric` balances multiple quality measures and is the recommended choice when the hole geometry is unknown. For flat holes use `getPlanarMetric`; for general-purpose use prefer `getCircumscribedMetric`.
+</Note>
+
+## Fix degeneracies
+
+Degenerate triangles — those with zero or near-zero area — destabilise most mesh algorithms. `fixMeshDegeneracies()` collapses tiny edges and merges coincident vertices.
+
+```python fix_degeneracies.py
+import sys
+import meshlib.mrmeshpy as mrmeshpy
+
+# Load mesh
+mesh = mrmeshpy.loadMesh("mesh.stl")
+
+# Configure parameters
+params = mrmeshpy.FixMeshDegeneraciesParams()
+params.maxDeviation = 1e-5 * mesh.computeBoundingBox().diagonal()
+params.tinyEdgeLength = 1e-3
+
+mrmeshpy.fixMeshDegeneracies(mesh, params)
+
+mrmeshpy.saveMesh(mesh, "fixed_mesh.stl")
+```
+
+<Tip>
+  Apply `fixMeshDegeneracies()` before running boolean operations or decimation. It is the first step in the recommended repair sequence: fix degeneracies → fix self-intersections → fill holes.
+</Tip>
+
+## Mesh offset
+
+Grow or shrink a mesh surface by a uniform offset distance. The algorithm works in voxel space, so the output is always a closed, manifold mesh.
+
+```python offset.py
+import meshlib.mrmeshpy as mrmeshpy
+import sys
+
+# Load mesh
+mesh = mrmeshpy.loadMesh("mesh.stl")
+
+# Setup parameters
+params = mrmeshpy.OffsetParameters()
+params.voxelSize = mesh.computeBoundingBox().diagonal() * 5e-3  # voxel grid precision
+if mrmeshpy.findRightBoundary(mesh.topology).empty():
+    params.signDetectionMode = mrmeshpy.SignDetectionMode.HoleWindingRule  # use for meshes with holes
+
+# Make offset mesh (5% of bounding box diagonal)
+offset = mesh.computeBoundingBox().diagonal() * 0.05
+try:
+    result_mesh = mrmeshpy.offsetMesh(mesh, offset, params)
+except ValueError as e:
+    print(e)
+    sys.exit(1)
+
+# Save result
+mrmeshpy.saveMesh(result_mesh, "offsetMesh.stl")
+```
+
+<Note>
+  `voxelSize` controls the resolution of the underlying voxel grid. Smaller values give a more accurate offset surface but use more memory and take longer to compute. A value of `diagonal * 5e-3` is a practical starting point.
+</Note>
+
+## Mesh extrude
+
+Extrude a subset of faces along a direction by duplicating the region boundary, then translating the selected vertices.
+
+```python extrude.py
+import meshlib.mrmeshpy as mrmeshpy
+
+# Load mesh
+mesh = mrmeshpy.loadMesh("mesh.stl")
+
+# Prepare the region to extrude
+faces_to_extrude = mrmeshpy.FaceBitSet()
+faces_to_extrude.resize(3, False)
+faces_to_extrude.set(mrmeshpy.FaceId(1), True)
+faces_to_extrude.set(mrmeshpy.FaceId(2), True)
+
+# Create duplicated verts on region boundary
+mrmeshpy.makeDegenerateBandAroundRegion(mesh, faces_to_extrude)
+
+# Find vertices that will be moved
+verts_for_move = mrmeshpy.getIncidentVerts(mesh.topology, faces_to_extrude)
+
+# Move each vertex in the Z direction
+for v in range(verts_for_move.size()):
+    if verts_for_move.test(mrmeshpy.VertId(v)):
+        mesh.points.vec[v] += mrmeshpy.Vector3f(0.0, 0.0, 1.0)
+
+# Invalidate internal caches after manually modifying vertices
+mesh.invalidateCaches()
+
+# Save mesh
+mrmeshpy.saveMesh(mesh, "extrudedMesh.stl")
+```
+
+<Warning>
+  Always call `mesh.invalidateCaches()` after directly modifying `mesh.points`. Skipping this step leaves internal caches (such as the AABB tree) in a stale state, which will produce incorrect results in any subsequent spatial query.
+</Warning>
+
+## Laplacian smoothing
+
+`Laplacian` deforms the mesh by fixing anchor vertices at new positions and letting the surrounding free vertices settle into a smooth configuration.
+
+```python laplacian.py
+from meshlib import mrmeshpy as mm
+
+# Load mesh
+mesh = mm.loadMesh("mesh.stl")
+
+# Construct deformer on mesh vertices
+lDeformer = mm.Laplacian(mesh)
+
+# Pick two anchor vertices (first and last valid)
+ancV0 = mesh.topology.getValidVerts().find_first()
+ancV1 = mesh.topology.getValidVerts().find_last()
+
+# Build the free region around the anchors
+freeVerts = mm.VertBitSet()
+freeVerts.resize(mesh.topology.getValidVerts().size())
+freeVerts.set(ancV0, True)
+freeVerts.set(ancV1, True)
+mm.expand(mesh.topology, freeVerts, 5)
+
+# Initialize the Laplacian
+lDeformer.init(freeVerts, mm.EdgeWeights.Cotan, mm.VertexMass.NeiArea)
+
+shiftAmount = mesh.computeBoundingBox().diagonal() * 0.01
+
+# Fix anchor vertices at their new positions (shifted along vertex normal)
+lDeformer.fixVertex(ancV0, mesh.points.vec[ancV0.get()] + mesh.normal(ancV0) * shiftAmount)
+lDeformer.fixVertex(ancV1, mesh.points.vec[ancV1.get()] + mesh.normal(ancV1) * shiftAmount)
+
+# Move free vertices according to anchor positions
+lDeformer.apply()
+
+# Invalidate mesh after external vertex changes
+mesh.invalidateCaches()
+
+# Save deformed mesh
+mm.saveMesh(mesh, "deformed_mesh.stl")
+```
+
+## Free-form deformation
+
+`FreeFormDeformer` warps mesh vertices using a tricubic lattice of control points. Move control points to sculpt the mesh without selecting individual vertices.
+
+```python free_form_deformation.py
+from meshlib import mrmeshpy as mm
+
+# Load mesh
+mesh = mm.loadMesh("mesh.stl")
+
+# Compute mesh bounding box
+box = mesh.computeBoundingBox()
+
+# Construct deformer on mesh vertices
+ffDeformer = mm.FreeFormDeformer(mesh.points, mesh.topology.getValidVerts())
+
+# Initialise with a 3×3×3 control point grid fitted to the bounding box
+ffDeformer.init(mm.Vector3i.diagonal(3), box)
+
+# Move control points to the center to pinch the mesh
+ffDeformer.setRefGridPointPosition(mm.Vector3i(1, 1, 0), box.center())
+ffDeformer.setRefGridPointPosition(mm.Vector3i(1, 1, 2), box.center())
+ffDeformer.setRefGridPointPosition(mm.Vector3i(0, 1, 1), box.center())
+ffDeformer.setRefGridPointPosition(mm.Vector3i(2, 1, 1), box.center())
+ffDeformer.setRefGridPointPosition(mm.Vector3i(1, 0, 1), box.center())
+ffDeformer.setRefGridPointPosition(mm.Vector3i(1, 2, 1), box.center())
+
+# Apply deformation to mesh vertices
+ffDeformer.apply()
+
+# Invalidate mesh after external vertex changes
+mesh.invalidateCaches()
+
+# Save deformed mesh
+mm.saveMesh(mesh, "deformed_mesh.stl")
+```
+
+<Tip>
+  Increasing the grid resolution (e.g. `Vector3i.diagonal(5)`) gives finer local control at the cost of more control points to manage. A 3×3×3 grid is a good starting point for global shape changes.
+</Tip>

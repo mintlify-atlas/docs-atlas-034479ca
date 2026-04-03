@@ -1,0 +1,90 @@
+---
+title: "Collision detection"
+description: "Detect intersecting faces between 3D meshes"
+---
+
+MeshLib provides two functions for detecting collisions between triangle meshes: `findCollidingTriangles()` and `findCollidingTriangleBitsets()`. Both operate on `MeshPart` inputs and use bounding volume hierarchy (BVH) acceleration internally.
+
+## Functions
+
+<CardGroup cols={2}>
+  <Card title="findCollidingTriangles()" icon="triangle">
+    Returns a list of face-pair structs, each containing `aFace` and `bFace` indices identifying a colliding triangle from each mesh.
+  </Card>
+  <Card title="findCollidingTriangleBitsets()" icon="table">
+    Returns two `FaceBitSet` objects — one per mesh — with a bit set for every face involved in at least one collision.
+  </Card>
+</CardGroup>
+
+## Fast boolean check
+
+Pass `firstIntersectionOnly=True` (Python) or set the corresponding flag to `true` (C++) to make `findCollidingTriangles()` return as soon as the first intersecting pair is found. This is significantly faster when you only need to know whether a collision exists.
+
+<Warning>
+When using `firstIntersectionOnly`, the returned list contains at most one pair. Do not assume the list is exhaustive — use `findCollidingTriangles()` without the flag to enumerate all collisions.
+</Warning>
+
+## Examples
+
+<CodeGroup>
+
+```python python
+from meshlib import mrmeshpy as mm
+
+meshA = mm.makeUVSphere() # make mesh A
+meshB = mm.makeUVSphere() # make mesh B
+meshB.transform(mm.AffineXf3f.translation(mm.Vector3f(0.1,0.1,0.1))) # shift mesh B for better demonstration
+
+collidingFacePairs = mm.findCollidingTriangles(meshA,meshB) # find each pair of colliding faces
+for fp in collidingFacePairs:
+    print(fp.aFace,fp.bFace) # print each pair of colliding faces
+
+collidingFaceBitSetA,collidingFaceBitSetB = mm.findCollidingTriangleBitsets(meshA,meshB) # find bitsets of colliding faces
+print(collidingFaceBitSetA.count()) # print number of colliding faces from mesh A
+print(collidingFaceBitSetB.count()) # print number of colliding faces from mesh B
+
+isColliding = not mm.findCollidingTriangles(meshA,meshB,firstIntersectionOnly=True).empty() # fast check if mesh A and mesh B collide
+print(isColliding)
+```
+
+```cpp C++
+#include "MRMesh/MRMakeSphereMesh.h"
+#include "MRMesh/MRMesh.h"
+#include "MRMesh/MRMatrix3.h"
+#include "MRMesh/MRAffineXf.h"
+#include "MRMesh/MRMeshCollide.h"
+#include <iostream>
+
+int main()
+{
+    auto meshA = MR::makeUVSphere(); // make mesh A
+    auto meshB = MR::makeUVSphere(); // make mesh B
+    meshB.transform( MR::AffineXf3f::translation( MR::Vector3f( 0.1f, 0.1f, 0.1f ) ) ); // shift mesh B for better demonstration
+
+    auto collidingFacePairs = MR::findCollidingTriangles( meshA, meshB ); // find each pair of colliding faces
+    for ( const auto [fa, fb] : collidingFacePairs )
+        std::cout << int( fa ) << " " << int( fb ) << "\n"; // print each pair of colliding faces
+
+    auto [collidingFaceBitSetA, collidingFaceBitSetB] = MR::findCollidingTriangleBitsets( meshA, meshB ); // find bitsets of colliding faces
+    std::cout << collidingFaceBitSetA.count() << "\n"; // print number of colliding faces from mesh A
+    std::cout << collidingFaceBitSetB.count() << "\n"; // print number of colliding faces from mesh B
+
+    auto isColliding = !MR::findCollidingTriangles( meshA, meshB, nullptr, true ).empty(); // fast check if mesh A and mesh B collide
+    std::cout << isColliding << "\n";
+    return 0;
+}
+```
+
+</CodeGroup>
+
+## Choosing between the two functions
+
+| Use case | Recommended function |
+|---|---|
+| Enumerate every colliding face pair | `findCollidingTriangles()` |
+| Count or mask colliding faces per mesh | `findCollidingTriangleBitsets()` |
+| Check whether any collision exists | `findCollidingTriangles(..., firstIntersectionOnly=True)` |
+
+<Note>
+Both functions require that the input meshes are closed and have valid BVH trees. Call `mesh.invalidateCaches()` if you have modified vertex positions before running collision detection.
+</Note>

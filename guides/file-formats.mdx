@@ -1,0 +1,141 @@
+---
+title: "File formats"
+description: "Supported mesh, point cloud, and volume file formats in MeshLib"
+---
+
+MeshLib can load and save a wide range of 3D file formats. The top-level `loadMesh()` / `saveMesh()` functions (Python) and `MeshLoad::fromAnySupportedFormat()` / `MeshSave::toAnySupportedFormat()` (C++) select the correct codec automatically based on the file extension.
+
+<Note>
+Format detection is always based on the file extension. Passing a file with an incorrect extension will cause a load or save error even if the content is valid.
+</Note>
+
+## Loading and saving meshes
+
+<CodeGroup>
+
+```python python
+import meshlib.mrmeshpy as mrmeshpy
+import sys
+
+# Load mesh
+try:
+    mesh = mrmeshpy.loadMesh("mesh.stl")
+except ValueError as e:
+    print(e)
+    sys.exit(1)
+
+# Save mesh
+try:
+    mrmeshpy.saveMesh(mesh, "mesh.ply")
+except ValueError as e:
+    print(e)
+    sys.exit(1)
+```
+
+```cpp C++
+#include <MRMesh/MRMesh.h>
+#include <MRMesh/MRMeshLoad.h>
+#include <MRMesh/MRMeshSave.h>
+#include <MRIOExtras/MRCtm.h>
+
+#include <iostream>
+
+int main()
+{
+    // Load mesh
+    std::filesystem::path inFilePath = "mesh.stl";
+    auto loadRes = MR::MeshLoad::fromAnySupportedFormat( inFilePath );
+    if ( !loadRes.has_value() )
+    {
+        std::cerr << loadRes.error() << std::endl;
+        return 1;
+    }
+
+    // Save mesh
+    std::filesystem::path outFilePath = "mesh.ply";
+    auto saveRes = MR::MeshSave::toAnySupportedFormat( loadRes.value(), outFilePath );
+    if ( !saveRes.has_value() )
+    {
+        std::cerr << saveRes.error() << std::endl;
+        return 1;
+    }
+
+    // More mesh formats are available in the MRIOExtras library
+    std::filesystem::path outCtmFilePath = "mesh.ctm";
+    saveRes = MR::MeshSave::toCtm( loadRes.value(), outCtmFilePath );
+    if ( !saveRes.has_value() )
+    {
+        std::cerr << saveRes.error() << std::endl;
+        return 1;
+    }
+
+    return 0;
+}
+```
+
+</CodeGroup>
+
+## Supported formats
+
+### Meshes
+
+| Format | Extension | Notes |
+|---|---|---|
+| STL (binary) | `.stl` | No color or texture support. Most widely supported format for 3D printing. |
+| STL (ASCII) | `.stl` | Human-readable variant. Larger file size than binary STL. |
+| OBJ | `.obj` | Supports UV texture coordinates and per-vertex colors via associated `.mtl` file. |
+| PLY | `.ply` | Supports per-vertex and per-face colors. Binary and ASCII variants. |
+| OFF | `.off` | Simple geometry-only format. No color or texture support. |
+| CTM | `.ctm` | Compressed binary format. Requires the `MRIOExtras` library. |
+| DXF | `.dxf` | CAD exchange format. Also used for polylines. |
+| MRMESH | `.mrmesh` | Internal MeshLib binary format. Fastest to load and save. |
+| 3MF | `.3mf` | XML-based format for additive manufacturing. Supports color and multiple objects. |
+| glTF / GLB | `.gltf`, `.glb` | Web and game-engine format. Supports textures, materials, and scene hierarchies. |
+
+<Warning>
+STL and OFF do not store vertex colors or UV texture coordinates. If you need to preserve color or material data, use PLY, OBJ, 3MF, or glTF instead.
+</Warning>
+
+### Point clouds
+
+| Format | Extension | Notes |
+|---|---|---|
+| PLY | `.ply` | Supports per-point colors and normals. |
+| PTS | `.pts` | Simple whitespace-delimited XYZ format. |
+| XYZ | `.xyz` | Plain-text XYZ coordinates, one point per line. |
+| LAS / LAZ | `.las`, `.laz` | LiDAR data format. LAZ is the compressed variant. |
+| CSV | `.csv` | Comma-separated coordinates. |
+
+### Volumes and CT data
+
+| Format | Extension | Notes |
+|---|---|---|
+| DICOM | `.dcm` | Standard medical imaging format for CT and MRI data. |
+| RAW | `.raw` | Headerless binary voxel data. |
+| GAV | `.gav` | MeshLib native volume format. |
+| TIFF | `.tif`, `.tiff` | Multi-page TIFF used as a voxel stack. |
+
+### Polylines
+
+| Format | Extension | Notes |
+|---|---|---|
+| DXF | `.dxf` | CAD format supporting both meshes and 2D/3D polylines. |
+| G-code | `.gcode` | CNC/3D printer toolpath format. |
+
+## Format-specific save functions (C++)
+
+In addition to `toAnySupportedFormat()`, MeshLib exposes dedicated save functions for each format in the `MR::MeshSave` namespace:
+
+```cpp C++
+MR::MeshSave::toBinaryStl( mesh, "output.stl" );
+MR::MeshSave::toAsciiStl( mesh, "output.stl" );
+MR::MeshSave::toObj( mesh, "output.obj" );
+MR::MeshSave::toPly( mesh, "output.ply" );
+MR::MeshSave::toOff( mesh, "output.off" );
+MR::MeshSave::toMrmesh( mesh, "output.mrmesh" );
+MR::MeshSave::to3mf( mesh, "output.3mf" );
+```
+
+<Tip>
+Use `toMrmesh()` / `loadMrmesh()` for intermediate storage when processing large meshes across multiple pipeline stages. The internal format avoids re-parsing overhead and preserves the full topology without lossy conversion.
+</Tip>

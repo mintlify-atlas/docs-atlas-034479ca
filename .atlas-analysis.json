@@ -1,0 +1,109 @@
+{
+  "projectType": "sdk-library",
+  "projectName": "MeshLib",
+  "projectDescription": "An open-source C++/Python SDK for high-performance 3D mesh and point cloud processing, supporting boolean operations, decimation, offsetting, registration, and voxel-based algorithms.",
+  "theme": "luma",
+  "primaryColor": "#fcfcfc",
+  "lightColor": "#5a3bba",
+  "darkColor": "#362377",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "installation",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/mesh-data-structure",
+              "concepts/point-clouds",
+              "concepts/voxels",
+              "concepts/transformations"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/mesh-boolean",
+              "guides/mesh-repair",
+              "guides/mesh-decimation",
+              "guides/mesh-offset",
+              "guides/point-cloud-triangulation",
+              "guides/registration-icp",
+              "guides/collision-detection",
+              "guides/file-formats"
+            ]
+          },
+          {
+            "group": "Language Bindings",
+            "pages": [
+              "bindings/python",
+              "bindings/cpp",
+              "bindings/c",
+              "bindings/csharp"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Examples",
+        "groups": [
+          {
+            "group": "Examples",
+            "pages": [
+              "examples/overview",
+              "examples/boolean-operations",
+              "examples/mesh-processing",
+              "examples/point-cloud",
+              "examples/registration",
+              "examples/voxel-operations"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "3D Boolean operations (union, intersection, difference) on meshes and voxels",
+    "Mesh repair: self-intersection removal, hole filling, degeneracy fixes",
+    "Mesh decimation and simplification with configurable tolerance",
+    "Mesh offsetting with multiple modes for 3D printing and machining",
+    "Point cloud triangulation and normal generation",
+    "ICP and multiway registration for mesh/point cloud alignment",
+    "Collision detection between 3D models",
+    "Voxel-based operations using OpenVDB",
+    "Extensive file format support: STL, OBJ, PLY, CTM, DICOM, and more",
+    "GPU acceleration via CUDA",
+    "Cross-platform: Windows, macOS, Linux, WebAssembly",
+    "Multi-language: C++, C, C#, Python bindings"
+  ],
+  "publicApiSurface": [
+    "mrmeshpy.loadMesh() / MR::loadMesh()",
+    "mrmeshpy.saveMesh() / MR::MeshSave::toAnySupportedFormat()",
+    "mrmeshpy.boolean() / MR::boolean()",
+    "mrmeshpy.decimateMesh() / MR::decimateMesh()",
+    "mrmeshpy.offsetMesh() / MR::offsetMesh()",
+    "mrmeshpy.fillHole() / MR::fillHole()",
+    "mrmeshpy.triangulatePointCloud() / MR::triangulatePointCloud()",
+    "mrmeshpy.ICP / MR::ICP",
+    "mrmeshpy.MultiwayICP / MR::MultiwayICP",
+    "mrmeshpy.findCollidingTriangles() / MR::findCollidingTriangles()",
+    "mrmeshpy.findSignedDistance() / MR::findSignedDistance()",
+    "mrmeshpy.makeUVSphere() / MR::makeUVSphere()",
+    "mrmeshpy.AffineXf3f / MR::AffineXf3f",
+    "mrmeshpy.PointCloud / MR::PointCloud",
+    "MR::Mesh (half-edge data structure)",
+    "MR::MeshBoolean / BooleanOperation enum",
+    "MR::DecimateSettings",
+    "MR::OffsetParameters",
+    "MR::ICPProperties",
+    "MR::FillHoleParams"
+  ]
+}

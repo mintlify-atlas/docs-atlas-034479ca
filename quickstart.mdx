@@ -1,80 +1,288 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: Quick start
+description: Get up and running with MeshLib in minutes. Load a mesh, run a boolean operation, decimate, and save the result.
 ---
 
-## Get started in three steps
+This guide walks you through a complete MeshLib workflow: loading a mesh, performing a boolean operation, decimating the result, and saving the output. Code examples are shown in Python and C++.
 
-Get your documentation site running locally and make your first customization.
+<Steps>
+  <Step title="Install MeshLib">
+    Install the Python package from PyPI:
 
-### Step 1: Set up your local environment
+    ```bash
+    pip install meshlib
+    ```
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
+    For C++, C, or C#, see the full [Installation guide](/installation).
+  </Step>
 
-### Step 2: Deploy your changes
+  <Step title="Load a mesh">
+    MeshLib can load meshes from STL, PLY, OBJ, CTM, and many other formats. The format is detected automatically from the file extension.
 
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+    <CodeGroup>
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+    ```python load_mesh.py
+    import meshlib.mrmeshpy as mrmeshpy
+    import sys
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+    # Load mesh — format is detected from the file extension
+    try:
+        mesh = mrmeshpy.loadMesh("mesh.stl")
+    except ValueError as e:
+        print(e)
+        sys.exit(1)
 
-### Step 3: Go live
+    print(f"Loaded mesh with {mesh.topology.numValidFaces()} faces")
+    ```
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+    ```cpp load_mesh.cpp
+    #include <MRMesh/MRMesh.h>
+    #include <MRMesh/MRMeshLoad.h>
+    #include <iostream>
+
+    int main()
+    {
+        // Load mesh — format is detected from the file extension
+        std::filesystem::path inFilePath = "mesh.stl";
+        auto loadRes = MR::MeshLoad::fromAnySupportedFormat(inFilePath);
+        if (!loadRes.has_value())
+        {
+            std::cerr << loadRes.error() << std::endl;
+            return 1;
+        }
+
+        std::cout << "Loaded mesh" << std::endl;
+        return 0;
+    }
+    ```
+
+    </CodeGroup>
+
+    <Tip>
+      To save a mesh in a different format, call `saveMesh` with the desired output path. The format is inferred from the extension:
+
+      ```python
+      mrmeshpy.saveMesh(mesh, "mesh.ply")
+      ```
+    </Tip>
+  </Step>
+
+  <Step title="Perform a boolean operation">
+    MeshLib's boolean operations — union, intersection, and difference — work on any pair of closed meshes. This example creates two overlapping spheres and computes their intersection.
+
+    <CodeGroup>
+
+    ```python boolean.py
+    import meshlib.mrmeshpy as mrmeshpy
+
+    # Create first sphere with radius of 1 unit
+    sphere1 = mrmeshpy.makeUVSphere(1.0, 64, 64)
+
+    # Create second sphere by cloning the first and translating it along X
+    sphere2 = mrmeshpy.copyMesh(sphere1)
+    xf = mrmeshpy.AffineXf3f.translation(mrmeshpy.Vector3f(0.7, 0.0, 0.0))
+    sphere2.transform(xf)
+
+    # Perform boolean intersection
+    result = mrmeshpy.boolean(sphere1, sphere2, mrmeshpy.BooleanOperation.Intersection)
+    if not result.valid():
+        print(result.errorString)
+    else:
+        # Save the result
+        mrmeshpy.saveMesh(result.mesh, "out_boolean.stl")
+        print(f"Boolean result has {result.mesh.topology.numValidFaces()} faces")
+    ```
+
+    ```cpp boolean.cpp
+    #include <MRMesh/MRMesh.h>
+    #include <MRMesh/MRMeshBoolean.h>
+    #include <MRMesh/MRMeshSave.h>
+    #include <MRMesh/MRUVSphere.h>
+    #include <iostream>
+
+    int main()
+    {
+        // Create first sphere with radius of 1 unit
+        MR::Mesh sphere1 = MR::makeUVSphere(1.0f, 64, 64);
+
+        // Create second sphere by cloning the first and translating it along X
+        MR::Mesh sphere2 = sphere1;
+        MR::AffineXf3f xf = MR::AffineXf3f::translation(MR::Vector3f(0.7f, 0.0f, 0.0f));
+        sphere2.transform(xf);
+
+        // Perform boolean intersection
+        MR::BooleanResult result = MR::boolean(sphere1, sphere2, MR::BooleanOperation::Intersection);
+        if (!result.valid())
+        {
+            std::cerr << result.errorString << std::endl;
+            return 1;
+        }
+
+        MR::Mesh resultMesh = *result;
+
+        // Save result to STL
+        if (auto saveRes = MR::MeshSave::toAnySupportedFormat(resultMesh, "out_boolean.stl"); !saveRes)
+        {
+            std::cerr << saveRes.error() << std::endl;
+            return 1;
+        }
+
+        return 0;
+    }
+    ```
+
+    </CodeGroup>
+
+    Available `BooleanOperation` values are `Union`, `Intersection`, and `DifferenceAB` / `DifferenceBA`. See the [mesh boolean guide](/guides/mesh-boolean) for details on each mode.
+  </Step>
+
+  <Step title="Decimate the mesh">
+    Decimation reduces the polygon count of a mesh while keeping the surface shape within a specified error tolerance. This is useful for reducing file size, improving rendering performance, or preparing geometry for downstream algorithms.
+
+    <CodeGroup>
+
+    ```python decimate.py
+    import meshlib.mrmeshpy as mrmeshpy
+
+    # Load mesh
+    mesh = mrmeshpy.loadMesh("out_boolean.stl")
+
+    # Repack mesh optimally before parallel processing.
+    # Not required, but highly recommended for best performance.
+    mesh.packOptimally()
+
+    # Configure decimation parameters
+    settings = mrmeshpy.DecimateSettings()
+
+    # Stop when either threshold is reached
+    settings.maxDeletedFaces = 1000  # Maximum faces to remove
+    settings.maxError = 0.05         # Maximum allowed surface deviation
+
+    # Parallel processing — set to number of available CPU cores or more
+    settings.subdivideParts = 64
+
+    # Run decimation in place
+    mrmeshpy.decimateMesh(mesh, settings)
+
+    # Save the decimated result
+    mrmeshpy.saveMesh(mesh, "decimatedMesh.stl")
+    print(f"Decimated mesh has {mesh.topology.numValidFaces()} faces")
+    ```
+
+    ```cpp decimate.cpp
+    #include <MRMesh/MRMesh.h>
+    #include <MRMesh/MRMeshLoad.h>
+    #include <MRMesh/MRMeshDecimate.h>
+    #include <MRMesh/MRMeshSave.h>
+    #include <iostream>
+
+    int main()
+    {
+        // Load mesh
+        auto loadRes = MR::MeshLoad::fromAnySupportedFormat("out_boolean.stl");
+        if (!loadRes.has_value())
+        {
+            std::cerr << loadRes.error() << std::endl;
+            return 1;
+        }
+        MR::Mesh mesh = std::move(loadRes.value());
+
+        // Repack mesh optimally before parallel processing
+        mesh.packOptimally();
+
+        // Configure decimation parameters
+        MR::DecimateSettings settings;
+        settings.maxDeletedFaces = 1000; // Maximum faces to remove
+        settings.maxError = 0.05f;       // Maximum allowed surface deviation
+        settings.subdivideParts = 64;    // Parallel processing partitions
+
+        // Run decimation in place
+        MR::decimateMesh(mesh, settings);
+
+        // Save result
+        if (auto saveRes = MR::MeshSave::toAnySupportedFormat(mesh, "decimatedMesh.stl"); !saveRes)
+        {
+            std::cerr << saveRes.error() << std::endl;
+            return 1;
+        }
+
+        return 0;
+    }
+    ```
+
+    </CodeGroup>
+
+    <Note>
+      `subdivideParts` splits the mesh into parallel work units during decimation. Setting it to the number of available CPU cores or higher gives the best throughput at a minor quality cost.
+    </Note>
+  </Step>
+
+  <Step title="Save the result">
+    Use `saveMesh` to write the final mesh to disk. The output format is determined by the file extension.
+
+    <CodeGroup>
+
+    ```python save.py
+    import meshlib.mrmeshpy as mrmeshpy
+    import sys
+
+    # Save as STL
+    try:
+        mrmeshpy.saveMesh(mesh, "output.stl")
+    except ValueError as e:
+        print(e)
+        sys.exit(1)
+
+    # Save as PLY
+    try:
+        mrmeshpy.saveMesh(mesh, "output.ply")
+    except ValueError as e:
+        print(e)
+        sys.exit(1)
+    ```
+
+    ```cpp save.cpp
+    #include <MRMesh/MRMeshSave.h>
+    #include <MRIOExtras/MRCtm.h>
+    #include <iostream>
+
+    // Save as PLY (format inferred from extension)
+    auto saveRes = MR::MeshSave::toAnySupportedFormat(mesh, "output.ply");
+    if (!saveRes.has_value())
+    {
+        std::cerr << saveRes.error() << std::endl;
+        return 1;
+    }
+
+    // Additional formats are available via MRIOExtras
+    // For example, the compact CTM format:
+    saveRes = MR::MeshSave::toCtm(mesh, "output.ctm");
+    if (!saveRes.has_value())
+    {
+        std::cerr << saveRes.error() << std::endl;
+        return 1;
+    }
+    ```
+
+    </CodeGroup>
+
+    Supported output formats include STL, PLY, OBJ, CTM, and more. For a full list, see the [file formats guide](/guides/file-formats).
+  </Step>
+</Steps>
 
 ## Next steps
 
-Now that you have your docs running, explore these key features:
-
 <CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
+  <Card title="Mesh data structure" icon="cube" href="/concepts/mesh-data-structure">
+    Learn how MeshLib's half-edge data structure represents meshes and why it matters for correctness and performance.
+  </Card>
+  <Card title="Mesh boolean guide" icon="code-merge" href="/guides/mesh-boolean">
+    Deep dive into union, intersection, and difference operations with advanced options and error handling.
+  </Card>
+  <Card title="Mesh decimation guide" icon="chart-line-down" href="/guides/mesh-decimation">
+    Control decimation parameters precisely — error thresholds, face count limits, parallel tuning, and more.
+  </Card>
+  <Card title="Examples" icon="flask" href="/examples/overview">
+    Browse the full collection of runnable examples covering boolean operations, point cloud processing, ICP registration, and voxel operations.
+  </Card>
 </CardGroup>
-
-<Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
-</Note>

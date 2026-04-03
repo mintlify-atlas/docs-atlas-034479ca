@@ -1,0 +1,97 @@
+---
+title: "C# / .NET bindings"
+description: "Use MeshLib from C# via the NuGet package"
+---
+
+MeshLib provides C# bindings through a NuGet package. All types are in the `MR` namespace and map directly to their C++ counterparts. Errors are surfaced as standard .NET exceptions, so you can use ordinary `try`/`catch` blocks for error handling.
+
+## Installation
+
+```bash
+dotnet add package MeshLib
+```
+
+.NET 6 and later are supported on Windows, macOS, and Linux.
+
+## Namespace
+
+```csharp
+using MR;
+```
+
+All MeshLib types — `Mesh`, `MeshLoad`, `MeshSave`, `BooleanResult`, `BooleanOperation` — are in the `MR` namespace.
+
+## Loading and saving meshes
+
+`MR.MeshLoad.fromAnySupportedFormat` and `MR.MeshSave.toAnySupportedFormat` detect the file format from the extension. They throw on failure, so wrap calls in a `try`/`catch` block.
+
+```csharp mesh_load_save.cs
+public class MeshLoadSaveExample
+{
+    public static void Run(string[] args)
+    {
+        try
+        {
+            var mesh = MR.MeshLoad.fromAnySupportedFormat("mesh.stl");
+            MR.MeshSave.toAnySupportedFormat(mesh, "mesh.ply");
+        }
+        catch (Exception e)
+        {
+            Console.WriteLine("Error: {0}", e.Message);
+        }
+    }
+}
+```
+
+## Boolean operations
+
+`MR.boolean()` takes two meshes and a `BooleanOperation` value and returns a `BooleanResult`. Access the output mesh through `res.mesh`.
+
+```csharp mesh_boolean.cs
+using System.Reflection;
+
+public class MeshBooleanExample
+{
+    public static void Run(string[] args)
+    {
+        if (args.Length != 3)
+        {
+            Console.WriteLine("Usage: {0} MeshBooleanExample INPUT1 INPUT2", Assembly.GetExecutingAssembly().GetName().Name);
+            return;
+        }
+
+        try
+        {
+            // load mesh
+            var mesh_a = MR.MeshLoad.fromAnySupportedFormat(args[1]);
+            var mesh_b = MR.MeshLoad.fromAnySupportedFormat(args[2]);
+
+            // perform boolean operation
+            MR.BooleanResult res = MR.boolean(mesh_a, mesh_b, MR.BooleanOperation.Intersection);
+
+            // save result to STL file
+            MR.MeshSave.toAnySupportedFormat(res.mesh, "out_boolean.stl");
+        }
+        catch (Exception e)
+        {
+            Console.WriteLine("Error: {0}", e.Message);
+        }
+    }
+}
+```
+
+Available `MR.BooleanOperation` values: `Union`, `Intersection`, `DifferenceAB`, `DifferenceBA`, `OutsideA`, `OutsideB`, `InsideA`, `InsideB`.
+
+## Key types
+
+| C# type | C++ equivalent | Description |
+|---|---|---|
+| `MR.Mesh` | `MR::Mesh` | Triangle mesh |
+| `MR.MeshLoad` | `MR::MeshLoad` | Static load methods |
+| `MR.MeshSave` | `MR::MeshSave` | Static save methods |
+| `MR.BooleanOperation` | `MR::BooleanOperation` | CSG operation enum |
+| `MR.BooleanResult` | `MR::BooleanResult` | Boolean output including `mesh` and error info |
+
+<Tip>
+  Type names in C# match their C++ counterparts exactly. You can refer to the C++ API documentation for detailed parameter descriptions when the C# overload signatures are otherwise identical.
+</Tip>

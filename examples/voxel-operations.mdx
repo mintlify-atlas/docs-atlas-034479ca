@@ -1,0 +1,76 @@
+---
+title: "Voxel operations examples"
+description: "Code examples for DICOM loading and voxel-based mesh processing"
+---
+
+MeshLib's voxel pipeline converts volumetric data (such as CT or MRI scans) into surface meshes. The pipeline follows three stages:
+
+1. **Load** — read DICOM slices from disk into a `VdbVolume` signed distance field
+2. **Process** — threshold, filter, or otherwise modify the voxel volume
+3. **Extract** — run marching cubes to produce a triangulated surface mesh
+
+<Warning>
+  Voxel operations require the **MRVoxels** module, which is included in the standard `meshlib` pip package but must be linked separately in C++ builds. Import it via `from meshlib import mrmeshpy` — the voxel functions live under `mrmeshpy.VoxelsLoad`.
+</Warning>
+
+## Load DICOM files
+
+`VoxelsLoad.loadDicomsFolderTreeAsVdb()` recursively walks a folder, groups numbered DICOM slices into volumes, and returns one `VdbVolume` per subfolder.
+
+```python open_dicom_files.py
+from meshlib import mrmeshpy
+
+# Path to a folder containing numbered DICOM slices, e.g.:
+#   3DSlice1.dcm, 3DSlice2.dcm, 3DSlice3.dcm
+# Subfolders are walked recursively — each subfolder becomes a separate volume.
+dicom_folder = "path/to/folder"
+
+# Load all DICOM volumes from the folder tree
+dicoms = mrmeshpy.VoxelsLoad.loadDicomsFolderTreeAsVdb(dicom_folder)
+
+# The result is a list; each entry corresponds to one folder/volume
+dicom = dicoms[0]
+
+# Check loading status
+if dicom:
+    # Access the VdbVolume object (common representation across MeshLib)
+    vdb_volume = dicom.value().vol
+else:
+    # Print the error message if loading failed
+    print(dicom.error())
+```
+
+<Note>
+  The folder can contain subfolders. Each subfolder's slices are loaded as a separate volume. Use `dicoms[0]`, `dicoms[1]`, etc. to access each one.
+</Note>
+
+## Full voxel pipeline: DICOM → mesh
+
+After loading a `VdbVolume`, extract a surface mesh using `gridToMesh()`. The `isoValue` parameter selects the intensity threshold (Hounsfield units for CT data) at which the surface is extracted.
+
+```python dicom_to_mesh.py
+from meshlib import mrmeshpy
+
+# Step 1: Load DICOM folder
+dicom_folder = "path/to/folder"
+dicoms = mrmeshpy.VoxelsLoad.loadDicomsFolderTreeAsVdb(dicom_folder)
+
+dicom = dicoms[0]
+if not dicom:
+    print("Failed to load DICOM:", dicom.error())
+    raise SystemExit(1)
+
+# Step 2: Get the VdbVolume
+vdb_volume = dicom.value().vol
+
+# Step 3: Extract surface mesh at a chosen iso-value
+# For CT bone segmentation a typical value is around 400 HU
+mesh_result = mrmeshpy.gridToMesh(vdb_volume.data, vdb_volume.voxelSize, isoValue=400.0)
+
+# Step 4: Save the mesh
+mrmeshpy.saveMesh(mesh_result, "output_mesh.stl")
+```
+
+<Tip>
+  The right `isoValue` depends on your scan modality and the tissue you want to segment. For CT data, bone is typically 300–700 HU and soft tissue is 0–100 HU. Visualise a histogram of the volume values to choose an appropriate threshold.
+</Tip>

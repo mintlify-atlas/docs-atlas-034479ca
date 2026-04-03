@@ -1,0 +1,185 @@
+---
+title: "Mesh data structure"
+description: "Understanding MeshLib's half-edge mesh representation"
+---
+
+MeshLib represents triangular meshes using a **half-edge data structure**. Every undirected edge is split into two directed half-edges pointing in opposite directions. This layout makes it efficient to traverse the mesh: given any half-edge you can immediately reach its origin vertex, destination vertex, left face, next half-edge in the face ring, and the symmetric (opposite-direction) half-edge.
+
+## Core element types
+
+MeshLib uses strongly-typed integer IDs to reference mesh elements. The `Id<T>` template in `MRId.h` prevents accidentally passing a face index where a vertex index is expected:
+
+```cpp
+// From MRId.h — typed integer IDs for compile-time safety
+using VertId         = Id<VertTag>;          // vertex index
+using EdgeId         = Id<EdgeTag>;          // directed half-edge index
+using UndirectedEdgeId = Id<UndirectedEdgeTag>; // undirected edge index
+using FaceId         = Id<FaceTag>;          // face index
+```
+
+An invalid (unset) ID has a negative internal value; call `.valid()` to check:
+
+```cpp
+FaceId f;          // default-constructed: invalid
+f.valid();         // false
+
+FaceId g( 42 );    // wraps integer 42
+g.valid();         // true
+```
+
+In Python the same types are available as `mrmeshpy.VertId`, `mrmeshpy.EdgeId`, and `mrmeshpy.FaceId`.
+
+## MeshTopology
+
+`MR::MeshTopology` (`MRMeshTopology.h`) owns all connectivity data. Internally it stores a flat array of `HalfEdgeRecord` structs, one per directed half-edge:
+
+```cpp
+struct HalfEdgeRecord {
+    EdgeId next; ///< next counter-clockwise half-edge in the origin ring
+    EdgeId prev; ///< next clockwise half-edge in the origin ring
+    VertId org;  ///< vertex at the origin of the edge
+    FaceId left; ///< face to the left of the edge
+};
+```
+
+Convenience accessors expose the logical relationships:
+
+```cpp
+MR::MeshTopology& topo = mesh.topology;
+
+EdgeId e = topo.edgeWithOrg( v );   // one outgoing edge from vertex v
+VertId o = topo.org( e );           // origin vertex of e
+VertId d = topo.dest( e );          // destination vertex of e
+FaceId f = topo.left( e );          // face to the left of e
+EdgeId s = e.sym();                 // opposite-direction twin
+
+// Iterate all outgoing edges of a vertex
+for ( EdgeId ei = e; ; )
+{
+    // process ei
+    ei = topo.next( ei );
+    if ( ei == e ) break;
+}
+```
+
+### Finding holes
+
+`findHoleRepresentiveEdges()` returns one boundary half-edge per hole — the half-edge with no valid left face that has the smallest `EdgeId` in each hole loop. This is the standard entry point for hole-filling algorithms:
+
+```cpp
+// Returns one edge per hole boundary (left face is invalid)
+std::vector<MR::EdgeId> holes = mesh.topology.findHoleRepresentiveEdges();
+```
+
+### Valid element sets
+
+`MeshTopology` caches three `BitSet` collections that track which elements are alive:
+
+| Method | Type | Meaning |
+|---|---|---|
+| `getValidVerts()` | `VertBitSet` | vertices with at least one incident edge |
+| `getValidFaces()` | `FaceBitSet` | faces with a valid left edge |
+| `numValidVerts()` | `int` | count of valid vertices |
+| `numValidFaces()` | `int` | count of valid faces |
+
+## MR::Mesh struct
+
+`MR::Mesh` (`MRMesh.h`) combines topology with geometry:
+
+```cpp
+struct Mesh {
+    MeshTopology topology; // connectivity: half-edges, vertices, faces
+    VertCoords   points;   // Vector<Vector3f, VertId> — one position per VertId
+    // ... cached AABBTree, dipoles, etc.
+};
+```
+
+`VertCoords` is `MR::Vector<MR::Vector3f, MR::VertId>` — a random-access array indexed directly by `VertId`.
+
+### Accessing mesh data
+
+<CodeGroup>
+
+```cpp C++
+#include <MRMesh/MRMesh.h>
+
+// Iterate all valid vertices
+for ( MR::VertId v : mesh.topology.getValidVerts() )
+{
+    MR::Vector3f pos = mesh.points[v];
+}
+
+// Iterate all valid faces
+for ( MR::FaceId f : mesh.topology.getValidFaces() )
+{
+    MR::Vector3f v0, v1, v2;
+    mesh.getTriPoints( f, v0, v1, v2 );
+    MR::Vector3f n = mesh.normal( f );
+}
+
+// Get three vertex IDs of a face
+MR::VertId a, b, c;
+mesh.topology.getTriVerts( f, a, b, c );
+```
+
+```python Python
+import meshlib.mrmeshpy as mrmeshpy
+
+mesh = mrmeshpy.loadMesh("model.stl")
+topo = mesh.topology
+
+# Iterate valid vertices
+for v in topo.getValidVerts():
+    pos = mesh.points[v]
+
+# Iterate valid faces
+for f in topo.getValidFaces():
+    v0, v1, v2 = mesh.getTriPoints(f)
+    n = mesh.normal(f)
+```
+
+</CodeGroup>
+
+## BitSets for subsets
+
+`VertBitSet`, `FaceBitSet`, and `EdgeBitSet` (as well as their `UndirectedEdge` variant) represent arbitrary subsets of mesh elements as compact bit arrays. Many MeshLib functions accept an optional `region` pointer of the appropriate BitSet type to restrict processing to a subset:
+
+```cpp
+// Work with only a face subset
+MR::FaceBitSet region = mesh.topology.getValidFaces(); // start from all faces
+region.reset( badFaceId );                             // exclude one face
+
+double areaOfRegion = mesh.area( &region );
+
+// Find boundary vertices within a region
+MR::VertBitSet bdVerts = mesh.topology.findBdVerts( &region );
+```
+
+In Python, `getValidVerts()` and `getValidFaces()` return iterable BitSet objects directly.
+
+## Manifold compliance
+
+MeshLib enforces **manifold topology**: every undirected edge is shared by at most two faces, and the faces around each vertex form a single fan (no pinch points). Non-manifold input can be handled at construction time:
+
+```cpp
+// Resolve non-manifold vertices by duplicating them
+MR::Mesh mesh = MR::Mesh::fromTrianglesDuplicatingNonManifoldVertices(
+    std::move( coords ), triangles );
+```
+
+<Note>
+A mesh can have boundary edges (edges with only one adjacent face). MeshLib considers this valid. "Manifold" here means no edge is shared by more than two faces and no vertex connects two disconnected surface fans.
+</Note>
+
+## Packing for performance
+
+After many edits, the internal arrays may contain gaps from deleted elements. `packOptimally()` tightly repacks all arrays and reorders elements spatially, which improves cache performance for search algorithms:
+
+```cpp
+// Repack and reorder for cache efficiency; preserves the AABB tree by default
+mesh.packOptimally();
+```
+
+<Tip>
+Call `packOptimally()` after bulk mesh edits (decimation, boolean operations, hole filling) before running expensive queries such as closest-point searches or signed-distance computations. The reordering places spatially adjacent faces at adjacent indices, which significantly improves AABB tree query performance.
+</Tip>

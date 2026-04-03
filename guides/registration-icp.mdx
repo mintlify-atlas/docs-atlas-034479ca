@@ -1,0 +1,195 @@
+---
+title: "ICP registration"
+description: "Align meshes and point clouds using Iterative Closest Point"
+---
+
+ICP (Iterative Closest Point) registration aligns a floating object to a fixed reference by iteratively minimizing the distance between corresponding point pairs. MeshLib provides `ICP` for pairwise alignment and `MultiwayICP` for aligning multiple objects simultaneously.
+
+## ICP modes
+
+MeshLib supports two distance metrics:
+
+- **Point-to-point** — minimizes the distance between matched point positions. More robust with noisy data but converges more slowly.
+- **Point-to-plane** — minimizes the distance from each floating point to the tangent plane of the nearest fixed surface point. Converges faster and is preferred when the fixed mesh has well-defined normals.
+
+Set the mode via `ICPProperties.icpMode` using the `ICPMode` enum.
+
+## ICPProperties
+
+| Property | Description |
+|---|---|
+| `distThresholdSq` | Maximum squared distance for a point pair to be considered active. Pairs farther apart than this are excluded. Typically set to `(diagonal * 0.1)²`. |
+| `exitVal` | Stops iteration when the RMS distance between active pairs falls below this value. Typically set to `diagonal * 0.003`. |
+| `icpMode` | `PointToPoint` or `PointToPlane`. |
+| `iterLimit` | Maximum number of ICP iterations. |
+| `badIterStopCount` | Stops early if the metric does not improve for this many consecutive iterations. |
+
+## Pairwise ICP
+
+<CodeGroup>
+
+```python python
+import meshlib.mrmeshpy as mrmeshpy
+
+# Load meshes
+meshFloating = mrmeshpy.loadMesh("meshA.stl")
+meshFixed = mrmeshpy.loadMesh("meshB.stl")
+
+# Prepare ICP parameters
+diagonal = meshFixed.getBoundingBox().diagonal()
+icp_sampling_voxel_size = diagonal * 0.01  # To sample points from object
+icp_params = mrmeshpy.ICPProperties()
+icp_params.distThresholdSq = (diagonal * 0.1) ** 2  # Use points pairs with maximum distance specified
+icp_params.exitVal = diagonal * 0.003  # Stop when this distance reached
+
+# Calculate transformation
+icp = mrmeshpy.ICP(meshFloating, meshFixed,
+                   mrmeshpy.AffineXf3f(), mrmeshpy.AffineXf3f(),
+                   icp_sampling_voxel_size)
+icp.setParams(icp_params)
+xf = icp.calculateTransformation()
+
+# Transform floating mesh
+meshFloating.transform(xf)
+
+# Output information string
+print(icp.getLastICPInfo())
+
+# Save result
+mrmeshpy.saveMesh(meshFloating, "meshA_icp.stl")
+```
+
+```cpp C++
+#include <MRMesh/MRBox.h>
+#include <MRMesh/MRICP.h>
+#include <MRMesh/MRMesh.h>
+#include <MRMesh/MRMeshLoad.h>
+#include <MRMesh/MRMeshSave.h>
+
+#include <iostream>
+
+int main()
+{
+    // Load meshes
+    auto meshFloatingRes = MR::MeshLoad::fromAnySupportedFormat( "meshA.stl" );
+    if ( !meshFloatingRes.has_value() )
+    {
+        std::cerr << meshFloatingRes.error() << std::endl;
+        return 1;
+    }
+    MR::Mesh& meshFloating = *meshFloatingRes;
+
+    auto meshFixedRes = MR::MeshLoad::fromAnySupportedFormat( "meshB.stl" );
+    if ( !meshFixedRes.has_value() )
+    {
+        std::cerr << meshFixedRes.error() << std::endl;
+        return 1;
+    }
+    MR::Mesh& meshFixed = *meshFixedRes;
+
+    // Prepare ICP parameters
+    float diagonal = meshFixed.getBoundingBox().diagonal();
+    float icpSamplingVoxelSize = diagonal * 0.01f; // To sample points from object
+    MR::ICPProperties icpParams;
+    icpParams.distThresholdSq = MR::sqr( diagonal * 0.1f ); // Use points pairs with maximum distance specified
+    icpParams.exitVal = diagonal * 0.003f; // Stop when distance reached
+
+    // Calculate transformation
+    MR::ICP icp(
+        MR::MeshOrPoints{ MR::MeshPart{ meshFloating } },
+        MR::MeshOrPoints{ MR::MeshPart{ meshFixed } },
+        MR::AffineXf3f(), MR::AffineXf3f(),
+        icpSamplingVoxelSize );
+    icp.setParams( icpParams );
+    MR::AffineXf3f xf = icp.calculateTransformation();
+
+    // Transform floating mesh
+    meshFloating.transform( xf );
+
+    // Output information string
+    std::string info = icp.getStatusInfo();
+    std::cerr << info << std::endl;
+
+    // Save result
+    if ( auto saveRes = MR::MeshSave::toAnySupportedFormat( meshFloating, "meshA_icp.stl" ); !saveRes )
+    {
+        std::cerr << saveRes.error() << std::endl;
+        return 1;
+    }
+}
+```
+
+</CodeGroup>
+
+<Note>
+The sampling voxel size controls how densely points are sampled from each object's surface. A value of `diagonal * 0.01` is a reasonable starting point — smaller values sample more points and increase accuracy at the cost of performance.
+</Note>
+
+## Multiway ICP (global registration)
+
+`MultiwayICP` aligns multiple point clouds or meshes simultaneously without a fixed reference. Each object gets its own transform, and the algorithm minimizes the total pairwise distance across all inputs.
+
+```python python
+import meshlib.mrmeshpy as mrmeshpy
+import sys
+
+
+def print_stats(icp):
+    num_active_pairs = icp.getNumActivePairs()
+    print(f"Number of samples: {icp.getNumSamples()}")
+    print(f"Number of active pairs: {num_active_pairs}")
+
+    if num_active_pairs > 0:
+        p2pt_metric = icp.getMeanSqDistToPoint()
+        p2pt_inaccuracy = icp.getMeanSqDistToPoint(value=p2pt_metric)
+        print(f"RMS point-to-point distance: {p2pt_metric} ± {p2pt_inaccuracy}")
+
+        p2pl_metric = icp.getMeanSqDistToPlane()
+        p2pl_inaccuracy = icp.getMeanSqDistToPlane(p2pt_metric)
+        print(f"RMS point-to-plane distance: {p2pl_metric} ± {p2pl_inaccuracy}")
+
+# Loading inputs and finding max bounding box
+file_args = sys.argv[1:]
+input_clouds_num = len(file_args) - 1
+inputs = []
+max_bbox = None
+for i in range(input_clouds_num):
+    points = mrmeshpy.loadPoints(file_args[i])
+    transform = mrmeshpy.AffineXf3f()
+    points_with_transform = mrmeshpy.MeshOrPointsXf(points, transform)
+    inputs.append(points_with_transform)
+
+    bbox = points.getBoundingBox()
+    if not max_bbox or bbox.volume() > max_bbox.volume():
+        max_bbox = bbox
+
+# ICP initialization
+sampling_params = mrmeshpy.MultiwayICPSamplingParameters()
+sampling_params.samplingVoxelSize = max_bbox.diagonal() * 0.03
+
+inputs_obj = mrmeshpy.Vector_MeshOrPointsXf_ObjId(inputs)
+
+icp = mrmeshpy.MultiwayICP(inputs_obj, sampling_params)
+icp_properties = mrmeshpy.ICPProperties()
+icp.setParams(icp_properties)
+
+icp.updateAllPointPairs()
+
+print("Calculating transformations...")
+xfs = icp.calculateTransformations()
+print_stats(icp)
+
+# Saving result
+output = mrmeshpy.PointCloud()
+for i in range(input_clouds_num):
+    transform = xfs.vec_[i]
+    for point in inputs[i].obj.points():
+        transformed_point = transform(point)
+        output.addPoint(transformed_point)
+
+mrmeshpy.PointsSave.toAnySupportedFormat(output, file_args[-1])
+```
+
+<Tip>
+Use `icp.getNumActivePairs()` after `updateAllPointPairs()` to verify that enough point correspondences were found before calculating transformations. A low count indicates the objects may be too far apart or `distThresholdSq` is set too tight.
+</Tip>

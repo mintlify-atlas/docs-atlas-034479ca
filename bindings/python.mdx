@@ -1,0 +1,128 @@
+---
+title: "Python bindings"
+description: "Use MeshLib from Python via the mrmeshpy module"
+---
+
+MeshLib ships a Python package called `meshlib` that exposes the full C++ API under the same type names. All C++ types and functions in the `MR` namespace are available in Python with identical names via `mrmeshpy`.
+
+## Installation
+
+```bash
+pip install meshlib
+```
+
+Python 3.8 and later are supported on Windows, macOS, and Linux.
+
+## Modules
+
+| Module | Purpose |
+|---|---|
+| `meshlib.mrmeshpy` | Main API — meshes, boolean, decimation, I/O, transforms |
+| `meshlib.mrmeshnumpy` | NumPy integration — convert between `Mesh` and `ndarray` |
+
+<Tip>
+  All C++ types in the `MR` namespace are exposed in Python with the same names. For example, `MR::Mesh` becomes `mrmeshpy.Mesh` and `MR::BooleanOperation` becomes `mrmeshpy.BooleanOperation`.
+</Tip>
+
+## Loading and saving meshes
+
+`loadMesh` and `saveMesh` accept any file path. The format is detected from the extension. Errors are raised as `ValueError`.
+
+```python mesh_load_save.py
+import meshlib.mrmeshpy as mrmeshpy
+import sys
+
+# Load mesh
+try:
+    mesh = mrmeshpy.loadMesh("mesh.stl")
+except ValueError as e:
+    print(e)
+    sys.exit(1)
+
+# Save mesh
+try:
+    mrmeshpy.saveMesh(mesh, "mesh.ply")
+except ValueError as e:
+    print(e)
+    sys.exit(1)
+```
+
+## Boolean operations
+
+`boolean()` combines two meshes with a set-theoretic operation. Check `result.valid()` before accessing the output mesh.
+
+```python mesh_boolean.py
+import meshlib.mrmeshpy as mrmeshpy
+
+# create first sphere with radius of 1 unit
+sphere1 = mrmeshpy.makeUVSphere(1.0, 64, 64)
+
+# create second sphere by cloning the first sphere and moving it in X direction
+sphere2 = mrmeshpy.copyMesh(sphere1)
+xf = mrmeshpy.AffineXf3f.translation(mrmeshpy.Vector3f(0.7, 0.0, 0.0))
+sphere2.transform(xf)
+
+# perform boolean operation
+result = mrmeshpy.boolean(sphere1, sphere2, mrmeshpy.BooleanOperation.Intersection)
+if not result.valid():
+    print(result.errorString)
+else:
+    # save result to STL file
+    mrmeshpy.saveMesh(result.mesh, "out_boolean.stl")
+```
+
+Available `BooleanOperation` values: `Union`, `Intersection`, `DifferenceAB`, `DifferenceBA`, `OutsideA`, `OutsideB`, `InsideA`, `InsideB`.
+
+## NumPy integration
+
+`mrmeshnumpy` converts between MeshLib's `Mesh` type and NumPy arrays, letting you build or inspect meshes without writing individual vertices by hand.
+
+```python numpy_mesh.py
+import meshlib.mrmeshnumpy as mrmeshnumpy
+import numpy as np
+
+faces = np.ndarray(
+    shape=(2, 3),
+    dtype=np.int32,
+    buffer=np.array(
+        [
+            [0, 1, 2],
+            [2, 3, 0],
+        ],
+        dtype=np.int32,
+    ),
+)
+
+# mrmesh uses float32 for vertex coordinates
+# however, you could also use float64
+verts = np.ndarray(
+    shape=(4, 3),
+    dtype=np.float32,
+    buffer=np.array(
+        [
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [1.0, 1.0, 0.0],
+            [0.0, 1.0, 0.0]
+        ],
+        dtype=np.float32,
+    ),
+)
+
+mesh = mrmeshnumpy.meshFromFacesVerts(faces, verts)
+
+# some mesh manipulations
+
+out_verts = mrmeshnumpy.getNumpyVerts(mesh)
+out_faces = mrmeshnumpy.getNumpyFaces(mesh.topology)
+```
+
+| Function | Description |
+|---|---|
+| `meshFromFacesVerts(faces, verts)` | Build a `Mesh` from face index and vertex arrays |
+| `getNumpyVerts(mesh)` | Extract vertex positions as an `(N, 3) float32` array |
+| `getNumpyFaces(topology)` | Extract face indices as an `(M, 3) int32` array |
+
+<Note>
+  Vertex coordinates use `float32` by default. `float64` arrays are also accepted by `meshFromFacesVerts` and will be converted automatically.
+</Note>

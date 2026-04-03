@@ -1,0 +1,155 @@
+---
+title: "Transformations"
+description: "Applying 3D transformations to meshes and point clouds"
+---
+
+MeshLib uses `MR::AffineXf3f` to represent all 3D affine transformations. An affine transform maps a point **x** to **A·x + b**, where **A** is a 3×3 linear matrix and **b** is a translation vector.
+
+## AffineXf3f
+
+`MR::AffineXf3<T>` is defined in `MRAffineXf.h` (with `MRAffineXf3.h` providing the 3D specialization):
+
+```cpp
+template <typename V>
+struct AffineXf {
+    M A; // linear part (Matrix3<T> for 3D)
+    V b; // translation vector (Vector3<T> for 3D)
+
+    // Apply transform to a point
+    V operator()( const V& x ) const { return A * x + b; }
+    // Apply only the linear part (e.g. to a normal vector)
+    V linearOnly( const V& x ) const { return A * x; }
+    // Compute the inverse transform
+    AffineXf inverse() const;
+};
+
+using AffineXf3f = AffineXf<Vector3f>;
+using AffineXf3d = AffineXf<Vector3d>;
+```
+
+## Creating transforms
+
+Three static factory methods cover the most common cases:
+
+```cpp
+// Translation only (identity linear part)
+MR::AffineXf3f t = MR::AffineXf3f::translation( MR::Vector3f{ 1.0f, 2.0f, 0.0f } );
+
+// Linear only (no translation) — e.g. rotation or scale
+MR::AffineXf3f r = MR::AffineXf3f::linear( MR::Matrix3f::rotation( MR::Vector3f::plusZ(), MR::PI_F * 0.5f ) );
+
+// Transform that keeps a given point (stable) fixed
+MR::AffineXf3f s = MR::AffineXf3f::xfAround( MR::Matrix3f::scale( 2.0f ), pivot );
+```
+
+## Vector3f
+
+`MR::Vector3f` (`MRVector3.h`) is the fundamental 3D vector type. It holds three `float` components `x`, `y`, `z` and supports the standard arithmetic operators plus several geometric helpers:
+
+```cpp
+MR::Vector3f a{ 1.0f, 0.0f, 0.0f };
+MR::Vector3f b{ 0.0f, 1.0f, 0.0f };
+
+float   d  = MR::dot( a, b );          // dot product → 0
+MR::Vector3f c = MR::cross( a, b );   // cross product → (0, 0, 1)
+float   len = a.length();              // Euclidean length
+MR::Vector3f n = a.normalized();       // unit vector
+
+// Axis-aligned unit vectors
+MR::Vector3f px = MR::Vector3f::plusX();
+MR::Vector3f py = MR::Vector3f::plusY();
+MR::Vector3f pz = MR::Vector3f::plusZ();
+```
+
+## Composing transforms
+
+The composition operator `*` chains two transforms so that `(u * v)(x) == u(v(x))`:
+
+```cpp
+MR::AffineXf3f translate = MR::AffineXf3f::translation( { 0, 0, 5 } );
+MR::AffineXf3f rotate    = MR::AffineXf3f::linear( MR::Matrix3f::rotation( MR::Vector3f::plusZ(), MR::PI_F ) );
+
+// First rotate, then translate
+MR::AffineXf3f combined = translate * rotate;
+```
+
+## Applying transforms
+
+`Mesh::transform` applies an `AffineXf3f` to vertex positions in-place. An optional `VertBitSet* region` restricts the transform to a subset of vertices:
+
+<CodeGroup>
+
+```cpp C++
+#include <MRMesh/MRAffineXf3.h>
+#include <MRMesh/MRMesh.h>
+
+MR::Mesh mesh = MR::makeTorus();
+
+// Rotate 90° around Z axis
+MR::AffineXf3f rotationXf = MR::AffineXf3f::linear(
+    MR::Matrix3f::rotation( MR::Vector3f::plusZ(), MR::PI_F * 0.5f ) );
+mesh.transform( rotationXf );
+
+// Translate by (10, 0, 0)
+MR::AffineXf3f translationXf = MR::AffineXf3f::translation( { 10.0f, 0.0f, 0.0f } );
+mesh.transform( translationXf );
+```
+
+```python Python
+import math
+import meshlib.mrmeshpy as mrmeshpy
+
+mesh = mrmeshpy.loadMesh("mesh.stl")
+
+# Rotate 90° around Z axis
+plus_z = mrmeshpy.Vector3f()
+plus_z.z = 1.0
+rotation_xf = mrmeshpy.AffineXf3f.linear(
+    mrmeshpy.Matrix3f.rotation(plus_z, math.pi * 0.5)
+)
+mesh.transform(rotation_xf)
+
+# Translate by (10, 0, 0)
+translation_xf = mrmeshpy.AffineXf3f.translation(
+    mrmeshpy.Vector3f(10.0, 0.0, 0.0)
+)
+mesh.transform(translation_xf)
+```
+
+</CodeGroup>
+
+`PointCloud::transform` follows the same signature. It applies the linear part of the transform to normals as well (without the translation), keeping them consistent with the moved points.
+
+## Rigid vs affine transforms
+
+An **affine** transform (`AffineXf3f`) can represent any combination of rotation, translation, scale, shear, and reflection — the linear matrix **A** is unconstrained.
+
+A **rigid** transform restricts **A** to a proper rotation matrix (determinant = +1, `A·Aᵀ = I`). MeshLib provides `MR::RigidXf3<T>` (often aliased as `MR::RigidXf3f`) for algorithms that require distance preservation, such as ICP registration:
+
+```cpp
+// RigidXf3f: rotation + translation only (no scale or shear)
+MR::RigidXf3f rigid;
+rigid.a = MR::Matrix3f::rotation( axis, angle ); // rotation
+rigid.b = MR::Vector3f{ dx, dy, dz };            // translation
+```
+
+<Note>
+Use `AffineXf3f` for general geometric operations. Use `RigidXf3f` (or convert with `AffineXf3f( rigid.a, rigid.b )`) when the algorithm requires an isometry — for example when aligning two scans with ICP.
+</Note>
+
+## Applying a transform to a point manually
+
+You can apply a transform to any `Vector3f` using `operator()`:
+
+```cpp
+MR::AffineXf3f xf = MR::AffineXf3f::translation( { 1, 2, 3 } );
+MR::Vector3f pt{ 0, 0, 0 };
+MR::Vector3f moved = xf( pt ); // → (1, 2, 3)
+```
+
+In Python, `Vector3f` has a `transformed(xf)` method:
+
+```python
+pt = mrmeshpy.Vector3f(0.0, 0.0, 0.0)
+moved = pt.transformed(xf)
+```

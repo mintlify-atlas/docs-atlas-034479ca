@@ -1,0 +1,100 @@
+---
+title: "Point cloud triangulation"
+description: "Convert point clouds into triangle meshes with accurate normals"
+---
+
+Point cloud triangulation reconstructs a surface mesh from an unordered set of 3D points. MeshLib provides `triangulatePointCloud()` to perform this conversion. For best results, generate or orient normals on the point cloud before triangulating.
+
+<Note>
+`triangulatePointCloud()` returns `nullopt` (C++) or raises if the operation is canceled via a progress callback. Under normal use the result is always valid.
+</Note>
+
+## Normals and sampling
+
+Triangulation quality depends on well-oriented normals. If your point cloud lacks normals, compute them first. Duplicate or densely clustered points can also cause artifacts — use `pointUniformSampling()` to thin the cloud before triangulating.
+
+## Basic usage
+
+<CodeGroup>
+
+```python python
+from meshlib import mrmeshpy as mm
+
+pc = mm.loadPoints("Points.ply")
+nefertiti_mesh = mm.triangulatePointCloud(pc)
+mm.saveMesh(nefertiti_mesh, "Mesh.ctm")
+```
+
+```cpp C++
+#include <MRMesh/MRPointsLoad.h>
+#include <MRMesh/MRPointCloud.h>
+#include <MRMesh/MRPointCloudTriangulation.h>
+#include <MRMesh/MRMeshSave.h>
+#include <iostream>
+
+int main()
+{
+    // load points
+    auto loadRes = MR::PointsLoad::fromAnySupportedFormat( "Points.ply" );
+    if ( !loadRes.has_value() )
+    {
+        std::cerr << loadRes.error() << "\n";
+        return 1; // error while loading file
+    }
+    auto triangulationRes = MR::triangulatePointCloud( *loadRes );
+    assert( triangulationRes ); // can be nullopt only if canceled by progress callback
+
+    auto saveRes = MR::MeshSave::toAnySupportedFormat( *triangulationRes, "Mesh.ctm" );
+    if ( !saveRes.has_value() )
+    {
+        std::cerr << saveRes.error() << "\n";
+        return 1; // error while saving file
+    }
+    return 0;
+}
+```
+
+</CodeGroup>
+
+## Sampling and mesh fixing
+
+When constructing a point cloud from a parametric surface (such as a UV sphere), duplicate points can cause topology issues. Remove them with `pointUniformSampling()` and fix any remaining issues with `offsetMesh()`.
+
+```python python
+from meshlib import mrmeshpy as mm
+from meshlib import mrmeshnumpy as mn
+import numpy as np
+
+u, v = np.mgrid[0:2 * np.pi:100j, 0:np.pi:100j]
+x = np.cos(u) * np.sin(v)
+y = np.sin(u) * np.sin(v)
+z = np.cos(v)
+
+# Prepare for MeshLib PointCloud
+verts = np.stack((x.flatten(), y.flatten(), z.flatten()), axis=-1).reshape(-1, 3)
+# Create MeshLib PointCloud from np ndarray
+pc = mn.pointCloudFromPoints(verts)
+# Remove duplicate points
+pc.validPoints = mm.pointUniformSampling(pc, 1e-3)
+pc.invalidateCaches()
+
+# Triangulate it
+triangulated_pc = mm.triangulatePointCloud(pc)
+
+# Fix possible issues
+triangulated_pc = mm.offsetMesh(triangulated_pc, 0.0)
+```
+
+<Tip>
+After triangulation, run `offsetMesh(mesh, 0.0)` to repair degenerate faces and non-manifold edges that occasionally appear in the reconstructed mesh.
+</Tip>
+
+## TriangulationParameters
+
+`triangulatePointCloud()` accepts an optional `TriangulationParameters` struct that controls reconstruction behavior. The defaults work well for most inputs, but you can tune them when working with noisy or sparse data.
+
+| Parameter | Description |
+|---|---|
+| `numNeighbours` | Number of nearest neighbors used to estimate the local surface. Increase for sparser clouds. |
+| `critAngle` | Maximum angle (radians) between a triangle normal and the estimated surface normal. Lower values produce tighter meshes. |
+| `searchRadius` | Maximum distance to search for neighboring points. Set to 0 to compute automatically. |

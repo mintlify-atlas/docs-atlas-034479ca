@@ -1,0 +1,223 @@
+---
+title: Installation
+description: Install MeshLib for Python, C++, C, or C# on Windows, macOS, Linux, and WebAssembly.
+---
+
+<Note>
+  MeshLib runs on **Windows**, **macOS**, **Linux** (Ubuntu 20.04+, Fedora), and **WebAssembly**. Python 3.8 or later is required for the Python bindings. For C++ and C, a compiler with C++20 support is recommended.
+</Note>
+
+<Tabs>
+  <Tab title="Python">
+    ## Install via pip
+
+    The Python package is published to PyPI. Install it with:
+
+    ```bash
+    pip install meshlib
+    ```
+
+    ## Verify the installation
+
+    Run the following snippet to confirm MeshLib loaded successfully:
+
+    ```python
+    import meshlib.mrmeshpy as mrmeshpy
+
+    # Create a simple UV sphere to verify the core API is available
+    sphere = mrmeshpy.makeUVSphere(1.0, 32, 32)
+    print(f"MeshLib loaded. Test sphere has {sphere.topology.numValidFaces()} faces.")
+    ```
+
+    You should see output similar to:
+
+    ```
+    MeshLib loaded. Test sphere has 2048 faces.
+    ```
+
+    ## Python modules
+
+    The `meshlib` package provides two main modules:
+
+    | Module | Description |
+    |--------|-------------|
+    | `meshlib.mrmeshpy` | Full Python API — mesh processing, boolean operations, decimation, file I/O, and more |
+    | `meshlib.mrmeshnumpy` | NumPy integration for exchanging mesh data as arrays |
+  </Tab>
+
+  <Tab title="C++">
+    ## Install the package
+
+    Pre-built packages for Ubuntu, Fedora, macOS, and Windows are available on the [MeshLib GitHub Releases](https://github.com/MeshInspector/MeshLib/releases) page. Download the installer for your platform and follow the bundled instructions.
+
+    Alternatively, you can build MeshLib from source:
+
+    ```bash
+    git clone https://github.com/MeshInspector/MeshLib.git
+    cd MeshLib
+    ./scripts/build_thirdparty.sh   # Linux/macOS
+    cmake -B build -DCMAKE_BUILD_TYPE=Release
+    cmake --build build --parallel
+    ```
+
+    ## CMake integration
+
+    Once installed, link against MeshLib in your `CMakeLists.txt` using the installed config:
+
+    ```cmake
+    cmake_minimum_required(VERSION 3.16)
+    project(MyApp CXX)
+
+    set(CMAKE_CXX_STANDARD 20)
+
+    # Locate the MeshLib installation
+    find_package(MeshLib REQUIRED)
+
+    add_executable(my_app main.cpp)
+
+    target_include_directories(my_app PRIVATE ${MESHLIB_INCLUDE_DIR})
+    target_link_libraries(my_app PRIVATE MRMesh)
+    ```
+
+    The installed config file at `meshlib-config.cmake` exposes the following CMake variables:
+
+    | Variable | Description |
+    |----------|-------------|
+    | `MESHLIB_INCLUDE_DIR` | Path to MeshLib and ImGui headers |
+    | `MESHLIB_THIRDPARTY_INCLUDE_DIR` | Third-party include directory |
+    | `MESHLIB_THIRDPARTY_LIB_DIR` | Third-party library directory |
+    | `MESHLIB_BUILD_MRCUDA` | `ON` if CUDA support was compiled in |
+    | `MESHLIB_BUILD_VOXELS` | `ON` if voxel support was compiled in |
+
+    ## Verify the build
+
+    Compile and run a minimal program:
+
+    ```cpp
+    #include <MRMesh/MRMesh.h>
+    #include <MRMesh/MRUVSphere.h>
+    #include <iostream>
+
+    int main()
+    {
+        MR::Mesh sphere = MR::makeUVSphere(1.0f, 32, 32);
+        std::cout << "MeshLib loaded. Faces: "
+                  << sphere.topology.numValidFaces() << std::endl;
+        return 0;
+    }
+    ```
+  </Tab>
+
+  <Tab title="C">
+    ## MeshLibC2 package
+
+    The C bindings are distributed as the `MeshLibC2` package, generated from the C++ API. They provide a stable ABI suitable for integration in C projects or as a bridge to other languages.
+
+    Download `MeshLibC2` from the [MeshLib GitHub Releases](https://github.com/MeshInspector/MeshLib/releases) page. The archive contains headers and pre-built shared libraries.
+
+    Include the package headers in your project:
+
+    ```c
+    #include <MRCMesh/MRMesh.h>
+    #include <MRCMesh/MRMeshLoad.h>
+    #include <MRCMesh/MRMeshSave.h>
+    ```
+
+    ## Linking
+
+    Pass the library path and link flag when building:
+
+    ```bash
+    gcc my_app.c -I/path/to/meshlibc2/include -L/path/to/meshlibc2/lib \
+        -lMeshLibC2 -o my_app
+    ```
+
+    ## Verify the installation
+
+    ```c
+    #include <MRCMesh/MRMesh.h>
+    #include <MRCMesh/MRMeshLoad.h>
+    #include <stdio.h>
+
+    int main(void)
+    {
+        printf("MeshLibC2 linked successfully.\n");
+        return 0;
+    }
+    ```
+
+    <Note>
+      The C API follows an ownership model where callers are responsible for destroying returned objects using the corresponding `_Destroy` functions. See the [C bindings guide](/bindings/c) for details.
+    </Note>
+  </Tab>
+
+  <Tab title="C#">
+    ## NuGet package
+
+    MeshLib is available as a NuGet package for .NET projects on Windows.
+
+    Install via the .NET CLI:
+
+    ```bash
+    dotnet add package MeshLib
+    ```
+
+    Or using the NuGet Package Manager Console in Visual Studio:
+
+    ```bash
+    Install-Package MeshLib
+    ```
+
+    ## Verify the installation
+
+    Add the following to a console application to confirm the package is working:
+
+    ```csharp
+    using System;
+
+    public class Program
+    {
+        public static void Main(string[] args)
+        {
+            try
+            {
+                var mesh = MR.MeshLoad.fromAnySupportedFormat("model.stl");
+                Console.WriteLine("MeshLib loaded successfully.");
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine($"Error: {e.Message}");
+            }
+        }
+    }
+    ```
+
+    <Tip>
+      The C# API mirrors the C++ API closely. Methods use `camelCase` naming consistent with the C++ binding conventions. See the [C# bindings guide](/bindings/csharp) for a full API reference.
+    </Tip>
+  </Tab>
+</Tabs>
+
+## Platform support
+
+<Note>
+  MeshLib is tested and distributed for the following platforms:
+
+  | Platform | Python | C++ | C | C# |
+  |----------|--------|-----|---|----|
+  | Windows 10/11 (x64) | Yes | Yes | Yes | Yes |
+  | macOS 12+ (x64, Apple Silicon) | Yes | Yes | — | — |
+  | Ubuntu 20.04+ (x64) | Yes | Yes | Yes | — |
+  | Fedora 35+ (x64) | Yes | Yes | Yes | — |
+  | WebAssembly (Emscripten) | — | Yes | — | — |
+
+  WebAssembly support requires building from source with the Emscripten toolchain. See the `MR_EMSCRIPTEN` flag in the CMake config.
+</Note>
+
+## System requirements
+
+- **CPU**: x86-64 or ARM64. Multi-core recommended for parallel decimation and boolean operations.
+- **RAM**: 4 GB minimum; 8 GB or more recommended for large meshes.
+- **GPU**: Optional. CUDA-capable GPU required for GPU-accelerated operations (`MESHLIB_BUILD_MRCUDA=ON`).
+- **Python**: 3.8 or later.
+- **C++ compiler**: GCC 10+, Clang 12+, or MSVC 2019+ with C++20 support.
